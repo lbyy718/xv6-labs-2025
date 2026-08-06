@@ -27,3 +27,8 @@ barrier
 *.pcap
 TAGS
 
+# Local collaboration materials (manuals, notes, and temporary evidence)
+/xv6-workspace/
+
+# Local backup image created during xv6 development
+*.img.bk
