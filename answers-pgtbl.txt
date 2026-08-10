@@ -1,0 +1,47 @@
+Inspect a user-process page table
+=================================
+
+Each valid leaf PTE contains the physical page number together with permission
+and status bits in its low ten bits.  The relevant bits here are V (valid), R
+(read), W (write), X (execute), U (user accessible), A (accessed), and D
+(dirty).  Physical addresses differ between runs because physical pages need
+not be contiguous.
+
+The entries printed in my run were:
+
+  va 0x0, perm 0x5b (V|R|X|U|A): the first page of pgtbltest's text and
+  read-only data.  User mode may read and execute it, but may not write it.
+
+  va 0x1000, perm 0x5b (V|R|X|U|A): the second page of the executable's
+  text/read-only segment, with the same user read/execute permissions.
+
+  va 0x2000, perm 0x17 (V|R|W|U): the program's writable data and BSS page.
+  It is user readable and writable, but not executable.  A and D were clear
+  when this PTE was sampled because this page had not yet been accessed.
+
+  va 0x3000, perm 0x07 (V|R|W): the stack guard page.  It has a physical page,
+  but U is clear, so user-mode accesses fault.
+
+  va 0x4000, perm 0xd7 (V|R|W|U|A|D): the one-page user stack.  It is user
+  readable and writable, and had already been accessed and modified.
+
+  va 0x5000, 0x6000, 0x7000, 0x8000, and 0x9000 each have PTE 0 and perm 0:
+  these addresses are above the current process size, so no physical pages are
+  mapped there.  They are part of the currently unallocated heap/address gap.
+
+  va 0x3fffff6000, 0x3fffff7000, 0x3fffff8000, 0x3fffff9000,
+  0x3fffffa000, 0x3fffffb000, and 0x3fffffc000 each have PTE 0 and perm 0:
+  these high virtual addresses are also unmapped.
+
+  va 0x3fffffd000 has PTE 0 and perm 0: this is the virtual address reserved
+  for USYSCALL.  It is intentionally still unmapped before the next exercise
+  is implemented.
+
+  va 0x3fffffe000, perm 0xc7 (V|R|W|A|D): the process's trapframe page.  The
+  kernel/trampoline uses it to save and restore user registers.  U is clear,
+  so ordinary user code cannot access it.
+
+  va 0x3ffffff000, perm 0x4b (V|R|X|A): the trampoline code page.  It is
+  readable and executable but not writable.  U is clear because the
+  trampoline runs in supervisor mode even though this mapping is present in
+  the user page table.
