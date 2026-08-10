@@ -1,0 +1,27 @@
+1. The function that called syscall() was usertrap().  The observed
+   backtrace was syscall() -> usertrap().
+
+2. After stepping past myproc(), p->trapframe->a7 was 0xf (15).  This
+   is SYS_open, the system-call number for init's open("console",
+   O_RDWR) call.  Register a7 carries the system-call number from user
+   space into the kernel.
+
+3. The observed sstatus value was 0x200000022.  Its SPP bit (bit 8) was
+   zero, so the CPU had previously been running in user mode before the
+   trap entered supervisor mode.
+
+4. After temporarily replacing the assignment with num = *(int *)0,
+   the panic reported sepc=0x80001cf8.  The instruction at that address
+   was:
+
+       lw a3, 0(zero)
+
+   GDB confirmed the same instruction at the breakpoint.  Register a3
+   corresponds to the local variable num in this build.
+
+5. The kernel crashed because the instruction tried to load an integer
+   from virtual address zero.  Address zero is not mapped in the kernel
+   page table.  The reported scause was 0xd (load page fault), and stval
+   was 0x0, confirming that the invalid load address was zero.
+
+6. The process running at the fault was named "init", and its PID was 1.
