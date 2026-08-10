@@ -105,4 +105,5 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   uint syscall_mask;           // System calls rejected by interpose
+  char allowed_path[MAXPATH];  // Path allowed for masked open and exec
 };
