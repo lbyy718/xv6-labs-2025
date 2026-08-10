@@ -76,7 +76,7 @@ xv6 是一个面向教学的 Unix 风格操作系统。本项目以 MIT 6.1810 2
 
 | Lab | 主题 | 实现状态 | `make grade` | 报告状态 |
 |---|---|---|---|---|
-| util | Unix utilities | 待验收 | 待记录 | 待完善 |
+| util | Unix utilities | 已完成 | 131/131 | 已完成 |
 | syscall | System calls | 未开始 | — | 未开始 |
 | pgtbl | Page tables | 未开始 | — | 未开始 |
 | traps | Traps | 未开始 | — | 未开始 |
@@ -137,64 +137,233 @@ make qemu
 | 项目 | 内容 |
 |---|---|
 | 官方分支 | `util` |
-| 实验主题 | Unix 用户程序、进程、管道、文件与目录 |
-| 具体任务 | 待按 2025 官方页面和当前分支填写 |
-| 基线提交 | 待记录 |
-| 完成提交 | 待记录 |
+| 实验主题 | xv6 用户程序、文件 I/O、C 内存表示、目录遍历和进程控制 |
+| 具体任务 | `sleep`、`sixfive`、`memdump`、`find`、`find -exec` |
+| 基线提交 | `db9a9d8` |
+| 完成提交 | `5493306` |
+| 实际用时 | 6 小时 |
+| 最终评分 | 131/131 |
 
-### 3.2 任务一：待填写官方任务名
+本 Lab 的任务集合与旧版 xv6 Lab 不同。开发前先对照 2025 官方页面、本地 `grade-lab-util` 和当前分支文件，确定了真实任务及评分边界，再按一个功能一个 Git 检查点的方式实现。
+
+### 3.2 sleep：用户级延时程序
 
 #### 3.2.1 实验目的
 
-待填写。
+实现用户级 `sleep` 命令，将命令行中的 ticks 参数转换为整数，并调用 xv6 2025 版已提供的 `pause()` 系统调用暂停当前进程。
 
-#### 3.2.2 前期准备、相关原理与调用链
+#### 3.2.2 原理与调用链
 
-待填写。
+```text
+shell 解析 sleep 10
+  → main(argc, argv)
+  → atoi(argv[1])
+  → pause(ticks) 用户态桩
+  → sys_pause()
+  → 根据时钟中断更新的 ticks 休眠与唤醒
+```
 
-#### 3.2.3 设计与实现步骤
+2025 版的内核入口是 `sys_pause`，不是旧版报告常见的 `sys_sleep`。`kernel/sysproc.c`、`user/user.h` 和系统调用桩均已存在，因此本任务只需增加用户程序，无需修改内核。
 
-| 修改文件/函数 | 修改内容 | 设计理由 |
+#### 3.2.3 设计与实现
+
+| 文件 | 修改 | 作用 |
 |---|---|---|
-| 待填写 | 待填写 | 待填写 |
+| `user/sleep.c` | 新建用户程序 | 验证参数、转换 ticks、调用 `pause()` |
+| `Makefile` | 在 `UPROGS` 中加入 `_sleep` | 将程序编译并写入 xv6 文件系统镜像 |
 
-<!-- 仅放关键代码片段，每段代码后解释“为什么”。 -->
+```c
+if(argc != 2){
+  fprintf(2, "usage: sleep ticks\n");
+  exit(1);
+}
+pause(atoi(argv[1]));
+exit(0);
+```
 
-#### 3.2.4 实验结果
+参数数量必须精确为 1，避免读取不存在或多余的参数。无参数运行时向标准错误输出用法，并以非零状态退出。
 
-| 类型 | 命令/用例 | 预期结果 | 实际结果 |
+#### 3.2.4 实验结果与分析
+
+| 测试 | 结果 |
+|---|---|
+| 无参数运行 | 输出 `usage: sleep ticks` 并正常返回 shell |
+| `sleep 10` | 暂停约 10 ticks 后返回 shell |
+| `./grade-lab-util sleep` | 3/3 测试通过，包括断点验证 `sys_pause` 被调用 |
+
+评分脚本不仅检查程序是否返回，还在 `sys_pause` 设置断点，因此全部通过说明程序确实进入了要求的系统调用，而不是用空循环模拟延时。
+
+### 3.3 sixfive：文本文件中的数字筛选
+
+#### 3.3.1 实验目的
+
+使用 `open()` 和 `read()` 逐字符读取一个或多个文件，识别由官方指定分隔符包围的十进制数字，输出能被 5 或 6 整除的值。
+
+#### 3.3.2 解析设计
+
+实现使用三个状态量：
+
+- `valid`：当前 token 是否仍由纯数字构成；
+- `have_digits`：当前 token 是否至少读到一个数字；
+- `value`：按十进制累积的数值。
+
+遇到空格、减号、回车、制表符、换行、点、斜杠、逗号或 EOF 时结算 token。如果 token 中出现其他非数字字符，则整个 token 无效，直到下一分隔符才重置。这保证了 `06` 会作为数值 6 输出，而 `xv6` 中的字符 `6` 不会被误识别。
+
+#### 3.3.3 实现与结果
+
+| 文件 | 修改 | 作用 |
+|---|---|---|
+| `user/sixfive.c` | 新建逐字符解析程序 | 处理 token、整除判断、多文件和错误路径 |
+| `Makefile` | 在 `UPROGS` 中加入 `_sixfive` | 将程序加入镜像 |
+
+```text
+$ sixfive sixfive.txt README
+5
+100
+18
+6
+6
+6
+1810
+6
+1810
+```
+
+<div align="center">
+<img src="report-assets/util-sixfive-01.png" alt="sixfive 多文件测试结果" width="355">
+<br>图 3-1 sixfive 对 sixfive.txt 和 README 的多文件处理结果
+</div>
+
+`./grade-lab-util sixfive` 中的 `sixfive_test`、`sixfive_readme` 和 `sixfive_all` 均通过，分别验证了基本数字解析、文本内嵌数字边界和多文件顺序处理。
+
+### 3.4 memdump：按格式解释连续内存
+
+#### 3.4.1 实验目的
+
+实现 `memdump(char *fmt, char *data)`，理解 C 语言中整数、字符、指针、结构体对齐和字符串在连续内存中的表示。
+
+#### 3.4.2 格式字符与指针推进
+
+| 格式 | 解释方式 | `data` 推进 |
+|---|---|---:|
+| `i` | 32 位有符号整数，十进制 | 4 字节 |
+| `p` | 64 位数值，十六进制 | 8 字节 |
+| `h` | 16 位有符号整数，十进制 | 2 字节 |
+| `c` | 8 位 ASCII 字符 | 1 字节 |
+| `s` | 当前 8 字节保存的字符串指针 | 8 字节 |
+| `S` | 当前位置的 NUL 结尾内联字符串 | 字符串长度 + 1 |
+
+多字节字段没有直接将 `char *` 强制转换后解引用，而是先使用 `memmove` 复制到正确类型的局部变量。这样既使字节宽度明确，也避免了未对齐地址的直接访问。
+
+#### 3.4.3 实验结果与分析
+
+<div align="center">
+<img src="report-assets/util-memdump-01.png" alt="memdump 内置示例结果" width="318">
+<br>图 3-2 memdump 对整数、指针、字符和字符串的解析结果
+</div>
+
+内置五组示例全部得到预期输出。图 3-2 中 Example 4 的首行是运行时指针值，具体地址每次可能不同，不影响正确性。`./grade-lab-util memdump` 的内置示例和标准输入组合两项测试均通过。
+
+### 3.5 find：递归查找目录树
+
+#### 3.5.1 实验目的与调用链
+
+实现简化版 Unix `find`，使用 xv6 的文件和目录系统调用递归查找指定名称的文件。
+
+```text
+open(path)
+  → fstat(fd, &st)
+  ├─ T_FILE：取路径最后一段，使用 strcmp() 匹配
+  └─ T_DIR：read(fd, &dirent, sizeof(dirent))
+       → 构造子路径
+       → 递归 find(child, name)
+```
+
+#### 3.5.2 设计与实现
+
+| 关键点 | 处理方式 |
+|---|---|
+| 目录项名称 | 复制固定长度 `DIRSIZ` 后显式补 `\0` |
+| 递归循环 | 跳过 inode 为 0 的目录项及 `.`、`..` |
+| 路径匹配 | 提取最后一段后使用 `strcmp()`，不使用指针 `==` |
+| 路径安全 | 在 512 字节缓冲区中追加目录项前检查长度 |
+| 资源管理 | 打开或 `fstat` 失败时报错，所有返回路径正确 `close(fd)` |
+
+`./grade-lab-util 'find, in' 'find, recursive'` 验证了当前目录、指定子目录和多层递归三种情况，全部通过。
+
+### 3.6 find -exec：对匹配文件执行命令
+
+#### 3.6.1 实验目的
+
+在不破坏基础 `find path name` 行为的前提下，支持：
+
+```text
+find path name -exec command [args ...]
+```
+
+对每个匹配文件，实际执行“`command`、原命令参数、匹配路径”。
+
+#### 3.6.2 进程控制与参数构造
+
+```text
+文件名匹配
+  → 复制 -exec 后的原参数
+  → 追加匹配文件路径
+  → fork()
+     ├─ 子进程：exec(argv[0], argv)
+     └─ 父进程：wait(0)
+```
+
+参数数组使用 `kernel/param.h` 中的 `MAXARG` 作为上限，并为追加的匹配路径和末尾空指针预留位置。父进程等待子进程结束，使多个匹配文件的命令输出保持可预期顺序。
+
+#### 3.6.3 回归测试与分析
+
+<div align="center">
+<img src="report-assets/util-find-exec-grade-01.png" alt="find 与 find -exec 回归评分" width="760">
+<br>图 3-3 find 与 find -exec 的六项回归测试
+</div>
+
+图 3-3 同时运行了三项基础 `find` 和三项 `exec` 测试，全部为 `OK`。这说明执行扩展没有改变原有查找语义，同时支持单参数、多参数和递归目录中的命令执行。
+
+### 3.7 关键问题与处理
+
+| 所属任务 | 问题/风险 | 原因 | 处理与验证 |
 |---|---|---|---|
-| 手工测试 | 待填写 | 待填写 | 待填写 |
-| 局部评分 | 待填写 | 通过 | 待填写 |
+| sleep | 旧资料使用 `sleep()`，当前任务要求 `pause()` | 2025 版重命名了用户和内核入口 | 以官方页面和本地 `sys_pause` 为准；断点评分通过 |
+| sixfive | `xv6` 中的 `6` 不应当作数字 | 非分隔符字母会使整个 token 无效 | 增加 `valid` 状态；README 边界测试通过 |
+| memdump | 将 `char *` 直接转成多字节指针可能未对齐 | 输入指针按 1 字节推进 | 使用 `memmove` 读入对齐局部变量；全部格式测试通过 |
+| find | `dirent.name` 不保证是普通 C 字符串 | 目录项使用固定长度 `DIRSIZ` | 复制后显式补 `\0`，再比较 `.`、`..` 和目标名 |
+| find -exec | 执行参数还需追加文件路径 | 空指针结尾和 `MAXARG` 都占用边界 | 执行前检查数量并显式结尾；多参数评分通过 |
 
-#### 3.2.5 分析讨论
+### 3.8 最终验收
 
-待解释结果为什么正确、边界条件如何处理，以及本任务与 xv6 原有机制的关系。
+完成所有任务后，在仓库根目录创建 `time.txt`，填写实际用时 6 小时。随后从干净编译状态运行：
 
-### 3.3 其他任务
+```bash
+make clean
+make grade
+```
 
-<!-- 每个官方任务复制 3.2 的五段结构，不得将多个任务混成一段。 -->
+| 验收项 | 结果 |
+|---|---|
+| sleep | 3 项通过 |
+| sixfive | 3 项通过 |
+| memdump | 2 项通过 |
+| find | 3 项通过 |
+| find -exec | 3 项通过 |
+| time | 通过 |
+| 最终总分 | **131/131** |
 
-待根据 2025 版 util Lab 的实际任务补齐。
+<div align="center">
+<img src="report-assets/util-grade-final-01.png" alt="util Lab 完整评分 131/131" width="360">
+<br>图 3-4 util Lab 完整评分结果
+</div>
 
-### 3.4 问题、原因与解决方法
+### 3.9 本 Lab 心得
 
-| 所属任务 | 现象 | 原因定位 | 解决方法 | 验证结果 |
-|---|---|---|---|---|
-| 待填写 | 待填写 | 待填写 | 待填写 | 待填写 |
+本 Lab 的代码量不大，但每个任务都对应一类基础能力：`sleep` 连接了用户程序与系统调用，`sixfive` 训练了基于字节流的状态解析，`memdump` 直接展示了类型在内存中的字节表示，`find` 和 `find -exec` 则把目录结构、递归、文件描述符和进程控制串联起来。
 
-### 3.5 本 Lab 心得
-
-待填写。
-
-### 3.6 验收记录
-
-| 验收项 | 命令/证据 | 结果 |
-|---|---|---|
-| 干净编译 | `make clean` | 待验收 |
-| 完整评分 | `make grade` | 待验收 |
-| 关键运行截图 | `report-assets/` | 待整理 |
-| 分支与提交 | `util` / 待填写 commit | 待推送 |
+实验过程中最重要的方法是先核对当前版本的任务和评分脚本，再将功能拆成小检查点。每一项都经过“编译—手工样例—局部评分—Git 提交”，最后再做整体回归，因此出现问题时能够明确它属于哪个功能。这种节奏也为后续更复杂的内核 Lab 建立了可复用的开发和验收流程。
 
 ## 4. Lab syscall：System calls
 
@@ -523,7 +692,8 @@ make qemu
 1. MIT 6.1810 Fall 2025 Course Website: <https://pdos.csail.mit.edu/6.828/2025/>
 2. MIT 6.1810 Tools: <https://pdos.csail.mit.edu/6.828/2025/tools.html>
 3. MIT 6.1810 Lab Guidance: <https://pdos.csail.mit.edu/6.828/2025/labs/guidance.html>
-4. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
+4. MIT 6.1810 Lab: Xv6 and Unix utilities: <https://pdos.csail.mit.edu/6.828/2025/labs/util.html>
+5. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
 
 <!-- 参考同学报告时只借鉴结构；若最终正文实际引用了其观点，必须在此显式标注。 -->
 
@@ -536,7 +706,7 @@ make qemu
 
 | Lab | 分支 | 关键提交 | 最终评分 |
 |---|---|---|---|
-| util | `util` | 待填写 | 待填写 |
+| util | `util` | `6bff0db`、`10d4cfd`、`52d4487`、`c28178d`、`5493306` | 131/131 |
 | syscall | `syscall` | 待填写 | 待填写 |
 | pgtbl | `pgtbl` | 待填写 | 待填写 |
 | traps | `traps` | 待填写 | 待填写 |
@@ -550,13 +720,20 @@ make qemu
 
 ### 附录 A：完整评分结果
 
-待整理各 Lab 最终 `make grade` 的文本摘要或关键截图。
+| Lab | 命令 | 结果 | 证据 |
+|---|---|---|---|
+| util | `make clean && make grade` | 131/131 | 图 3-4 |
+
+其他 Lab 待完成后继续补充。
 
 ### 附录 B：报告图片索引
 
 | 图片 | 所属章节 | 说明 |
 |---|---|---|
-| 待填写 | 待填写 | 待填写 |
+| `report-assets/util-sixfive-01.png` | 3.3 | sixfive 多文件处理结果 |
+| `report-assets/util-memdump-01.png` | 3.4 | memdump 内置五组示例 |
+| `report-assets/util-find-exec-grade-01.png` | 3.6 | find 与 find -exec 六项回归评分 |
+| `report-assets/util-grade-final-01.png` | 3.8 | util 完整评分 131/131 |
 
 ### 附录 C：答辩演示命令
 
