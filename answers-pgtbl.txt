@@ -45,3 +45,14 @@ The entries printed in my run were:
   readable and executable but not writable.  U is clear because the
   trampoline runs in supervisor mode even though this mapping is present in
   the user page table.
+
+Speed up system calls
+=====================
+
+uptime() could also avoid a kernel crossing.  The kernel could maintain the
+current tick count in a physical page that it maps read-only into every user
+page table.  A user-space uptime implementation could then read that value
+directly.  Since the value is global, all processes can map the same physical
+page instead of requiring the kernel to update one copy per process.  The
+reader would need an atomic or sequence-based protocol if the shared value
+could not be read atomically.
