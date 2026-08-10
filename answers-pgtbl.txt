@@ -56,3 +56,39 @@ directly.  Since the value is global, all processes can map the same physical
 page instead of requiring the kernel to update one copy per process.  The
 reader would need an atomic or sequence-based protocol if the shared value
 could not be read atomically.
+
+Print a page table
+==================
+
+The leaf mappings in vmprint describe the same user address space as the leaf
+PTEs printed by print_pgtbl.  vmprint additionally shows the valid level-2 and
+level-1 PTEs that point to lower-level page-table pages, while print_pgtbl
+also prints selected invalid virtual pages as zero.
+
+The low-address leaf pages are:
+
+  0x0 and 0x1000: pgtbltest text and read-only data, V|R|X|U (plus A after
+  access).  User code can read and execute these pages but cannot write them.
+
+  0x2000: writable data and BSS, V|R|W|U (plus A/D when accessed or written).
+
+  0x3000: the stack guard page, V|R|W without U, so user access faults.
+
+  0x4000: the user stack, V|R|W|U (and A|D after normal stack use).
+
+The high-address leaf pages are:
+
+  0x3fffffd000: the usyscall page containing the process PID, V|R|U (and
+  possibly A).  User code can read it but cannot modify it.
+
+  0x3fffffe000: the trapframe, V|R|W without U (and normally A|D).  It stores
+  the process's user registers during traps and is accessible only in
+  supervisor mode.
+
+  0x3ffffff000: the trampoline code, V|R|X without U (and normally A).  It is
+  the supervisor-only code used to enter and leave the kernel on a trap.
+
+Thus the leaf virtual addresses and permissions match print_pgtbl, except that
+USYSCALL is now valid because it was mapped by the preceding exercise.  The
+physical addresses may change between runs and are not required to be
+contiguous.
