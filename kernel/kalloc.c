@@ -10,6 +10,9 @@
 #include "defs.h"
 
 void freerange(void *pa_start, void *pa_end);
+#ifdef LAB_PGTBL
+void superfree(void *pa);
+#endif
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
@@ -23,11 +26,28 @@ struct {
   struct run *freelist;
 } kmem;
 
+#ifdef LAB_PGTBL
+#define NSUPERPAGE 16
+#define SUPERBASE (PHYSTOP - NSUPERPAGE * SUPERPGSIZE)
+
+struct {
+  struct spinlock lock;
+  struct run *freelist;
+} supermem;
+#endif
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+#ifdef LAB_PGTBL
+  initlock(&supermem.lock, "supermem");
+  freerange(end, (void *)SUPERBASE);
+  for(char *p = (char *)SUPERBASE; p < (char *)PHYSTOP; p += SUPERPGSIZE)
+    superfree(p);
+#else
   freerange(end, (void*)PHYSTOP);
+#endif
 }
 
 void
@@ -80,3 +100,41 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+
+#ifdef LAB_PGTBL
+// Free one of the reserved, two-megabyte-aligned physical regions.
+void
+superfree(void *pa)
+{
+  struct run *r;
+
+  if((uint64)pa % SUPERPGSIZE != 0 || (uint64)pa < SUPERBASE ||
+     (uint64)pa >= PHYSTOP)
+    panic("superfree");
+
+  memset(pa, 1, SUPERPGSIZE);
+  r = (struct run *)pa;
+
+  acquire(&supermem.lock);
+  r->next = supermem.freelist;
+  supermem.freelist = r;
+  release(&supermem.lock);
+}
+
+// Allocate a two-megabyte-aligned physical region.
+void *
+superalloc(void)
+{
+  struct run *r;
+
+  acquire(&supermem.lock);
+  r = supermem.freelist;
+  if(r)
+    supermem.freelist = r->next;
+  release(&supermem.lock);
+
+  if(r)
+    memset((char *)r, 5, SUPERPGSIZE);
+  return (void *)r;
+}
+#endif

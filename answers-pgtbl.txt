@@ -92,3 +92,19 @@ Thus the leaf virtual addresses and permissions match print_pgtbl, except that
 USYSCALL is now valid because it was mapped by the preceding exercise.  The
 physical addresses may change between runs and are not required to be
 contiguous.
+
+Use superpages
+==============
+
+The allocator reserves sixteen two-megabyte-aligned physical regions outside
+the ordinary 4 KiB free list.  uvmalloc maps one of these regions with a
+level-1 leaf PTE whenever both the virtual address and the remaining allocation
+range permit a complete two-megabyte mapping.  walkaddr includes the offset
+within a level-1 leaf when translating kernel accesses.
+
+uvmcopy preserves superpages by allocating and copying a complete two-megabyte
+region for the child.  A complete unmap returns the region directly to the
+superpage free list.  If sbrk cuts through a superpage, the mapping is first
+demoted into 512 independently allocated 4 KiB pages with identical contents
+and permissions; the requested 4 KiB pages can then be freed without losing
+the data that remains mapped.
