@@ -284,6 +284,12 @@ kfork(void)
   for(i = 0; i < NOFILE; i++)
     if(p->ofile[i])
       np->ofile[i] = filedup(p->ofile[i]);
+  for(i = 0; i < NVMA; i++){
+    if(p->vmas[i].length != 0){
+      np->vmas[i] = p->vmas[i];
+      np->vmas[i].file = filedup(p->vmas[i].file);
+    }
+  }
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
@@ -329,13 +335,16 @@ kexit(int status)
   if(p == initproc)
     panic("init exiting");
 
-  // Release any file-backed pages and file references held by VMAs.
+  // Write back and release all remaining file-backed mappings.
   for(int i = 0; i < NVMA; i++){
     if(p->vmas[i].length != 0){
-      uvmunmap(p->pagetable, p->vmas[i].addr,
-              PGROUNDUP(p->vmas[i].length) / PGSIZE, 1);
-      fileclose(p->vmas[i].file);
-      memset(&p->vmas[i], 0, sizeof(p->vmas[i]));
+      uint64 addr = p->vmas[i].addr;
+      uint64 length = p->vmas[i].length;
+      if(vmaunmap(p, addr, length) < 0){
+        uvmunmap(p->pagetable, addr, PGROUNDUP(length) / PGSIZE, 1);
+        fileclose(p->vmas[i].file);
+        memset(&p->vmas[i], 0, sizeof(p->vmas[i]));
+      }
     }
   }
 
