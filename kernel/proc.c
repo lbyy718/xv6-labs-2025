@@ -168,6 +168,11 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+  p->alarm_interval = 0;
+  p->alarm_ticks = 0;
+  p->alarm_handler = 0;
+  p->alarm_active = 0;
+  memset(&p->alarm_trapframe, 0, sizeof(p->alarm_trapframe));
   p->state = UNUSED;
 }
 
@@ -278,6 +283,12 @@ kfork(void)
 
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
+
+  np->alarm_interval = p->alarm_interval;
+  np->alarm_ticks = 0;
+  np->alarm_handler = p->alarm_handler;
+  np->alarm_active = 0;
+  np->alarm_trapframe = *(np->trapframe);
 
   // increment reference counts on open file descriptors.
   for(i = 0; i < NOFILE; i++)
