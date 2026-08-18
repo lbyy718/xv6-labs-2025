@@ -79,7 +79,7 @@ xv6 是一个面向教学的 Unix 风格操作系统。本项目以 MIT 6.1810 2
 | util | Unix utilities | 已完成 | 131/131 | 已完成 |
 | syscall | System calls | 已完成 | 45/45 | 已完成 |
 | pgtbl | Page tables | 已完成 | 41/41 | 已完成 |
-| traps | Traps | 未开始 | — | 未开始 |
+| traps | Traps | 已完成 | 95/95 | 已完成 |
 | cow | Copy-on-write | 未开始 | — | 未开始 |
 | net | Network driver | 未开始 | — | 未开始 |
 | lock | Locking | 未开始 | — | 未开始 |
@@ -763,39 +763,164 @@ superpage，同时为普通页、页表和内核对象保留足够内存。
 
 ### 6.1 实验概述
 
-| 官方分支 | 主题 | 具体任务 |
+| 项目 | 内容 |
+|---|---|
+| 官方分支 | `traps` |
+| 实验主题 | RISC-V 汇编、内核栈、陷阱帧和时钟中断 |
+| 具体任务 | RISC-V assembly、Backtrace、Alarm |
+| 基线提交 | `4270ccc` |
+| 完成提交 | `895895c` |
+| 实际用时 | 5 小时 |
+| 最终评分 | 95/95 |
+
+本 Lab 从静态反汇编逐步进入运行时陷阱处理。首先分析 RISC-V 调用约定、编译器
+内联和大小端表示；随后沿内核栈帧恢复系统调用的调用链；最后增加两个系统调用，
+利用时钟中断把用户进程临时重定向到 alarm handler，并在处理结束后完整恢复现场。
+
+### 6.2 RISC-V assembly：调用约定与反汇编分析
+
+#### 6.2.1 参数传递与编译优化
+
+RISC-V 使用 `a0` 至 `a7` 传递前八个整数或指针参数。`main()` 调用 `printf()`
+时，`a0` 保存格式字符串地址，`a1=12`，`a2=13`。其中 `f(8)+1` 没有产生函数
+调用：编译器先内联 `f()`，再把结果常量折叠为 12；`g()` 同样被内联为一条
+执行 `x+3` 的 `addiw` 指令。
+
+当前工具链生成的 `user/call.asm` 中，`printf` 位于 `0x6f6`，调用指令位于
+`0x30`。RISC-V 的 `jal` 把下一条指令地址写入 `ra`，因此进入 `printf` 后
+`ra=0x34`。
+
+#### 6.2.2 大小端与未定义行为
+
+整数 `0x00646c72` 在小端机器中的内存字节依次为 `72 6c 64 00`，解释为字符串
+`"rld"`，所以程序输出 `He110 World`。若改为大端机器且仍要得到相同字符串，
+整数应改为 `0x726c6400`；十进制数 57616 不需要修改，因为 `%x` 格式化的是
+数值而不是内存字节序列。
+
+当格式串要求两个整数而调用者只提供一个时，第二个值没有确定答案。`printf`
+会读取未提供的参数位置，程序属于未定义行为，不能把某次运行中偶然出现的数值
+写成语言或 ABI 保证的结果。
+
+<div align="center">
+<img src="report-assets/traps-assembly-grade-01.png" alt="RISC-V 汇编答案评分通过" width="760">
+<br>图 6-1 RISC-V 汇编分析答案通过专项检查
+</div>
+
+### 6.3 Backtrace：遍历内核栈帧
+
+#### 6.3.1 栈帧布局与边界
+
+编译参数保留了帧指针。RISC-V 内核函数进入后，`s0` 指向当前栈帧顶部，
+`s0-8` 保存返回地址，`s0-16` 保存上一帧的帧指针。因此回溯过程可表示为：
+
+```text
+r_fp() 读取 s0
+  → *(fp - 8) 取得当前返回地址
+  → *(fp - 16) 取得调用者 fp
+  → 重复，直到离开当前 4 KiB 内核栈页
+```
+
+在 `kernel/riscv.h` 中用内联汇编 `mv` 读取 `s0`，在 `kernel/printf.c` 中实现
+`backtrace()`。初始 `fp` 向下取整得到当前内核栈页下界，并以上界
+`stack_bottom + PGSIZE` 限制遍历；同时要求 `fp` 至少高于页底 16 字节，保证
+读取返回地址和上一帧指针不会跨入 guard page。
+
+#### 6.3.2 调用链验证
+
+`sys_pause()` 调用 `backtrace()` 后，`bttest` 打印三个返回地址。使用
+`riscv64-linux-gnu-addr2line -e kernel/kernel` 解析后得到：
+
+| 返回地址 | 源码位置 | 含义 |
 |---|---|---|
-| `traps` | RISC-V 汇编、陷阱、中断和用户/内核切换 | 待按 2025 版填写 |
+| `0x80001e3e` | `kernel/sysproc.c:75` | `sys_pause()` 调用点 |
+| `0x80001d18` | `kernel/syscall.c:141` | 系统调用分派 |
+| `0x80001a9c` | `kernel/trap.c:80` | 用户陷阱入口 |
 
-### 6.2 任务一：待填写官方任务名
+<div align="center">
+<img src="report-assets/traps-backtrace-grade-01.png" alt="Backtrace 评分和地址解析" width="760">
+<br>图 6-2 Backtrace 专项评分及三个返回地址的源码定位
+</div>
 
-#### 6.2.1 实验目的
+该结果同时验证了栈遍历格式和真实调用链。实现中 `%p` 的参数显式转换为
+`void *`，满足内核 `printf` 的格式检查并保持 64 位地址完整输出。
 
-待填写。
+### 6.4 Alarm：由时钟中断进入用户处理函数
 
-#### 6.2.2 前期准备、相关原理与调用链
+#### 6.4.1 系统调用与进程状态
 
-待填写寄存器、trapframe 和陷阱链路。
+实验新增 `sigalarm(interval, handler)` 和 `sigreturn()`，分配系统调用号 22、
+23，并补齐用户声明、调用桩、内核分派表和处理函数。`struct proc` 保存：
 
-#### 6.2.3 设计与实现步骤
+| 字段 | 作用 |
+|---|---|
+| `alarm_interval` | 两次 alarm 之间需要经过的 timer ticks |
+| `alarm_ticks` | 当前周期已经累计的 ticks |
+| `alarm_handler` | 用户处理函数入口地址 |
+| `alarm_active` | handler 是否正在运行，防止重入 |
+| `alarm_trapframe` | handler 执行前的完整用户寄存器现场 |
 
-待填写。
+`sigalarm()` 更新配置并重新计时。进程退出或结构被复用时清空 alarm 状态；fork
+复制父进程的周期和 handler，但子进程从未激活、计数为零的状态开始，避免继承
+一半执行中的 handler 现场。
 
-#### 6.2.4 实验结果
+#### 6.4.2 中断触发与现场恢复
 
-待填写运行、调试和局部评分结果。
+`usertrap()` 识别到 timer interrupt 后累计当前进程的 ticks。当累计值达到周期
+且 `alarm_active` 为 0 时，内核先复制整个 trapframe，再把返回用户态所用的
+`epc` 改为 handler 地址：
 
-#### 6.2.5 分析讨论
+```c
+p->alarm_trapframe = *(p->trapframe);
+p->trapframe->epc = p->alarm_handler;
+```
 
-待填写。
+于是 `prepare_return()` 不再回到被中断指令，而是首次进入用户 handler。
+handler 调用 `sigreturn()` 后，内核恢复保存的完整 trapframe 并清除 active
+标记，使原程序从被中断位置继续执行。
 
-### 6.3 其他任务
+完整恢复比只恢复 `epc` 更重要：时钟中断可能发生在任意用户指令之间，通用
+寄存器、栈指针和参数寄存器都属于被中断程序的现场。`sys_sigreturn()` 还先
+保存原 trapframe 中的 `a0` 并将其作为系统调用返回值，否则统一系统调用分派
+代码会把新的返回值再次写入 `a0`，覆盖刚恢复的原始寄存器。
 
-待按 6.2 的统一结构补齐。
+`alarm_active` 防止 handler 自身运行时间超过一个周期时再次进入 handler；
+只有显式执行 `sigreturn()` 后，下一次 alarm 才能被投递。
 
-### 6.4 问题与解决、心得及验收
+<div align="center">
+<img src="report-assets/traps-alarm-grade-01.png" alt="Alarm 四项测试通过" width="700">
+<br>图 6-3 Alarm 的单次/重复触发、寄存器恢复、防重入和 a0 保持测试
+</div>
 
-待记录 panic/GDB 分析闭环、`make grade` 结果、截图和 commit。
+### 6.5 问题闭环与最终验收
+
+| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
+|---|---|---|---|
+| `%p` 引起 `-Werror=format` | 内核格式属性要求 `%p` 对应指针参数 | 将返回地址显式转换为 `void *` | Backtrace 编译及评分通过 |
+| `exec alarmtest failed` | 新程序尚未写入当前 `fs.img`，且初始 Makefile 未加入目标 | 将 `_alarmtest` 加入 traps 的 `UPROGS` 并重建镜像 | `alarmtest` 可执行，四项均通过 |
+| handler 可能周期性重入 | 时钟中断在 handler 运行期间仍会发生 | 使用 `alarm_active` 门控，`sigreturn()` 后解除 | test2 通过 |
+| 原程序寄存器可能被破坏 | 只改 `epc` 无法保存任意中断点的完整状态 | 备份并恢复整个 trapframe，保护原始 `a0` | test1、test3 通过 |
+
+关键提交如下：
+
+| 提交 | 内容 |
+|---|---|
+| `c572d63` | 完成 RISC-V 汇编分析题 |
+| `59b7b78` | 实现内核栈 Backtrace |
+| `5abddb9` | 接入 Alarm 系统调用并处理时钟中断 |
+| `895895c` | 记录 5 小时实际用时并完成验收 |
+
+从干净状态运行 `make grade`，汇编答案、Backtrace、Alarm 的 test0 至 test3、
+`usertests` 和时间检查全部通过：
+
+<div align="center">
+<img src="report-assets/traps-grade-final-01.png" alt="traps Lab 完整评分 95/95" width="427">
+<br>图 6-4 traps Lab 完整评分结果 95/95
+</div>
+
+本 Lab 把静态 ABI 知识与动态控制流联系起来：函数调用依赖寄存器和栈帧约定，
+系统调用通过 trapframe 保存跨特权级现场，而异步 alarm 又要求内核在未知指令
+边界上完整保存并恢复用户状态。最大的收获是，中断处理的正确性不仅取决于
+“能跳到 handler”，更取决于恢复后程序是否像从未被打断一样继续运行。
 
 ## 7. Lab cow：Copy-on-write
 
@@ -1003,11 +1128,13 @@ trampoline。后续 traps、COW 和 mmap Lab 完成后再补充异常修复、�
 
 ### 12.4 各 Lab 之间的联系
 
-前三个已完成 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
+前四个已完成 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
 syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继续下降到支撑进程
 隔离的地址转换和物理页生命周期。`attack` 能泄露秘密的根因正是物理页重用时
 没有清零，而 pgtbl Lab 的 `kalloc`、`uvmalloc`、`uvmcopy` 和 `uvmunmap`
-进一步展示了这些页面如何分配、映射、复制和回收。
+进一步展示了这些页面如何分配、映射、复制和回收。traps 则解释了用户程序如何
+经 `ecall` 和 trapframe 穿过特权级边界，并通过 Backtrace 与 Alarm 分别观察
+同步系统调用链和异步时钟中断下的控制流保存与恢复。
 
 ## 13. 总结与心得
 
@@ -1023,8 +1150,9 @@ syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继
 4. MIT 6.1810 Lab: Xv6 and Unix utilities: <https://pdos.csail.mit.edu/6.828/2025/labs/util.html>
 5. MIT 6.1810 Lab: System calls: <https://pdos.csail.mit.edu/6.828/2025/labs/syscall.html>
 6. MIT 6.1810 Lab: Page tables: <https://pdos.csail.mit.edu/6.828/2025/labs/pgtbl.html>
-7. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
-8. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
+7. MIT 6.1810 Lab: Traps: <https://pdos.csail.mit.edu/6.828/2025/labs/traps.html>
+8. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
+9. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
 
 <!-- 参考同学报告时只借鉴结构；若最终正文实际引用了其观点，必须在此显式标注。 -->
 
@@ -1040,7 +1168,7 @@ syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继
 | util | `util` | `6bff0db`、`10d4cfd`、`52d4487`、`c28178d`、`5493306` | 131/131 |
 | syscall | `syscall` | `1c298e3`、`ee2117e`、`6cfe037`、`346d204`、`f031d96` | 45/45 |
 | pgtbl | `pgtbl` | `6097a95`、`781903e`、`d8c29ac`、`b7b1643`、`364eff0` | 41/41 |
-| traps | `traps` | 待填写 | 待填写 |
+| traps | `traps` | `c572d63`、`59b7b78`、`5abddb9`、`895895c` | 95/95 |
 | cow | `cow` | 待填写 | 待填写 |
 | net | `net` | 待填写 | 待填写 |
 | lock | `lock` | 待填写 | 待填写 |
@@ -1056,8 +1184,9 @@ syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继
 | util | `make clean && make grade` | 131/131 | 图 3-4 |
 | syscall | `make grade` | 45/45 | 图 4-4 |
 | pgtbl | `make grade` | 41/41 | 图 5-4 |
+| traps | `make grade` | 95/95 | 图 6-4 |
 
-其他 Lab 完成后继续补充。
+其余 Lab 完成后继续补充。
 
 ### 附录 B：报告图片索引
 
@@ -1075,6 +1204,10 @@ syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继
 | `report-assets/pgtbl-vmprint-01.png` | 5.4 | vmprint 三级页表树 |
 | `report-assets/pgtbl-superpages-01.png` | 5.5 | superpage fork、释放和降级测试 |
 | `report-assets/pgtbl-grade-01.png` | 5.6 | pgtbl 完整评分 41/41 |
+| `report-assets/traps-assembly-grade-01.png` | 6.2 | RISC-V 汇编答案专项评分 |
+| `report-assets/traps-backtrace-grade-01.png` | 6.3 | Backtrace 评分和返回地址解析 |
+| `report-assets/traps-alarm-grade-01.png` | 6.4 | Alarm 四项测试及实际输出 |
+| `report-assets/traps-grade-final-01.png` | 6.5 | traps 完整评分 95/95 |
 
 ### 附录 C：答辩演示命令
 
@@ -1103,5 +1236,18 @@ make qemu
 pgtbltest
 ```
 
+traps Lab：
+
+```bash
+git switch traps
+./grade-lab-traps backtrace
+grep -oE '^0x000000008[0-9a-f]+' xv6.out | while read -r addr; do
+  printf '%s -> ' "$addr"
+  riscv64-linux-gnu-addr2line -e kernel/kernel "$addr"
+done
+./grade-lab-traps alarm
+```
+
 预期分别看到 sandbox 的拒绝/例外行为、`attack` 输出秘密，以及
-`pgtbltest: all tests succeeded`。退出 QEMU 时先按 `Ctrl+A`，再按 `X`。
+`pgtbltest: all tests succeeded`；traps 演示应看到三层内核调用链及 Alarm 的
+test0 至 test3 全部为 `OK`。退出 QEMU 时先按 `Ctrl+A`，再按 `X`。
