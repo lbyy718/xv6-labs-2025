@@ -124,29 +124,46 @@ release(struct spinlock *lk)
 static void
 read_acquire_inner(struct rwspinlock *rwlk)
 {
-  // Replace this with your implementation.
-  acquire(&rwlk->l);
+  for(;;){
+    while(__atomic_load_n(&rwlk->writer, __ATOMIC_SEQ_CST) != 0 ||
+          __atomic_load_n(&rwlk->waiting_writers, __ATOMIC_SEQ_CST) != 0){
+      // spin
+    }
+
+    // A writer may announce itself between the initial checks and this increment.
+    __atomic_fetch_add(&rwlk->readers, 1, __ATOMIC_SEQ_CST);
+    if(__atomic_load_n(&rwlk->writer, __ATOMIC_SEQ_CST) == 0 &&
+       __atomic_load_n(&rwlk->waiting_writers, __ATOMIC_SEQ_CST) == 0)
+      return;
+
+    __atomic_fetch_sub(&rwlk->readers, 1, __ATOMIC_SEQ_CST);
+  }
 }
 
 static void
 read_release_inner(struct rwspinlock *rwlk)
 {
-  // Replace this with your implementation.
-  release(&rwlk->l);
+  __atomic_fetch_sub(&rwlk->readers, 1, __ATOMIC_SEQ_CST);
 }
 
 static void
 write_acquire_inner(struct rwspinlock *rwlk)
 {
-  // Replace this with your implementation.
-  acquire(&rwlk->l);
+  // Announce first so later readers cannot pass a waiting writer.
+  __atomic_fetch_add(&rwlk->waiting_writers, 1, __ATOMIC_SEQ_CST);
+  while(__atomic_exchange_n(&rwlk->writer, 1, __ATOMIC_SEQ_CST) != 0){
+    // spin
+  }
+  while(__atomic_load_n(&rwlk->readers, __ATOMIC_SEQ_CST) != 0){
+    // spin
+  }
+  __atomic_fetch_sub(&rwlk->waiting_writers, 1, __ATOMIC_SEQ_CST);
 }
 
 static void
 write_release_inner(struct rwspinlock *rwlk)
 {
-  // Replace this with your implementation.
-  release(&rwlk->l);
+  __atomic_store_n(&rwlk->writer, 0, __ATOMIC_SEQ_CST);
 }
 
 void
@@ -180,8 +197,9 @@ write_release(struct rwspinlock *rwlk)
 void
 initrwlock(struct rwspinlock *rwlk)
 {
-  // Replace this with your implementation.
-  initlock(&rwlk->l, "rwlk");
+  __atomic_store_n(&rwlk->readers, 0, __ATOMIC_SEQ_CST);
+  __atomic_store_n(&rwlk->writer, 0, __ATOMIC_SEQ_CST);
+  __atomic_store_n(&rwlk->waiting_writers, 0, __ATOMIC_SEQ_CST);
 }
 
 // Test rwspinlock implementation.
