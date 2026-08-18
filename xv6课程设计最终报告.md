@@ -81,7 +81,7 @@ xv6 是一个面向教学的 Unix 风格操作系统。本项目以 MIT 6.1810 2
 | pgtbl | Page tables | 已完成 | 41/41 | 已完成 |
 | traps | Traps | 已完成 | 95/95 | 已完成 |
 | cow | Copy-on-write | 已完成 | 130/130 | 已完成 |
-| net | Network driver | 未开始 | — | 未开始 |
+| net | Network driver | 已完成 | 171/171 | 已完成 |
 | lock | Locking | 未开始 | — | 未开始 |
 | fs | File system | 未开始 | — | 未开始 |
 | mmap | Memory mapping | 未开始 | — | 未开始 |
@@ -1063,35 +1063,176 @@ count == 0     → 填充垃圾值并放回 freelist
 
 ### 8.1 实验概述
 
-| 官方分支 | 主题 | 具体任务 |
-|---|---|---|
-| `net` | 网卡驱动、描述符环、中断和并发 | 待按 2025 版填写 |
+| 项目 | 内容 |
+|---|---|
+| 官方分支 | `net` |
+| 实验主题 | E1000 网卡驱动、以太网/IP/UDP 接收和阻塞式端口队列 |
+| 具体任务 | Part One: NIC、Part Two: UDP Receive |
+| 基线提交 | `982b43b` |
+| 完成提交 | `d9ad0dc` |
+| 实际用时 | 6 小时 |
+| 最终评分 | 171/171 |
 
-### 8.2 任务一：待填写官方任务名
+本 Lab 从设备驱动和协议栈两个层次建立 xv6 的网络接收路径。第一部分通过 E1000
+发送、接收描述符环在内核与模拟网卡之间转移以太网帧；第二部分解析 IPv4/UDP
+报文，按目标端口排队，并通过 `bind()`、`recv()` 和 `unbind()` 向用户进程提供
+阻塞式数据报接口。实现的核心问题是缓冲区所有权：同一页在驱动、协议栈、端口
+队列和用户接收调用之间流转时，任一分支都必须明确由谁最终释放。
+
+### 8.2 Part One：E1000 NIC 驱动
 
 #### 8.2.1 实验目的
 
-待填写。
+补全 `kernel/e1000.c` 中的发送与接收逻辑，使 xv6 能通过 QEMU 模拟的 Intel
+E1000 网卡发送以太网帧，并在网卡中断中取出所有已经到达的帧交给 `net_rx()`。
+同时保证 16 项环形描述符被循环复用，设备未完成 DMA 时不会覆盖仍在使用的槽位。
 
-#### 8.2.2 前期准备、相关原理与调用链
+#### 8.2.2 描述符环、DMA 与调用链
 
-待填写发送/接收描述符、DMA 和中断处理链。
+E1000 的 TX/RX 环各包含 16 个描述符。描述符中的 `addr` 指向一页内核缓冲区，
+设备通过 DMA 直接读取待发送帧或写入接收帧；软件与设备分别通过 head/tail
+寄存器协作，因此移动 tail 不只是修改普通变量，而是在向设备移交描述符所有权。
+
+```text
+发送：sys_send()/arp_rx()
+  → e1000_transmit()
+  → 检查 TDT 指向描述符的 DD 位
+  → 填入物理缓冲区地址、长度和 EOP|RS
+  → 推进 E1000_TDT，设备 DMA 发送
+
+接收：E1000 写入 RX 缓冲区并触发中断
+  → e1000_intr() 确认中断
+  → e1000_recv() 从 RDT 后一项开始检查 DD
+  → 为描述符安装新页并推进 E1000_RDT
+  → net_rx() 处理旧页中的以太网帧
+```
+
+`DD` 表示设备已经完成该描述符，`EOP` 表示当前缓冲区包含一帧的末尾，`RS`
+要求发送完成后回写状态。填好描述符后执行内存屏障，再更新 tail 寄存器，避免
+设备看到 tail 已推进但描述符字段尚未全部可见。
 
 #### 8.2.3 设计与实现步骤
 
-待填写。
+发送路径由 `e1000_lock` 串行化，因为多个进程可能同时调用 `send()`，ARP 回复
+也可能在中断处理路径提交发送请求。实现先读取 `E1000_TDT`，若当前描述符没有
+`DD` 则返回 `-1`，由调用者释放尚未移交的页；若描述符可用，则释放该槽上一次
+已经发送完成的缓冲区，填入本次帧并以模 16 推进 tail。这样旧页只在硬件确认
+完成后回收，新页在发送成功后由驱动负责。
+
+接收路径使用循环而不是每次中断只处理一个描述符。每轮查看
+`(E1000_RDT + 1) % RX_RING_SIZE`：若没有 `DD` 就停止；否则先保存旧页和帧长，
+再分配替换页、清状态并归还描述符。只有带 `EOP` 且无硬件错误的完整帧才交给
+`net_rx()`，其余帧直接释放。若暂时无法分配替换页，则丢弃当前帧并继续让原页
+留在接收环中，避免把空地址交给设备或使环永久停顿。
 
 #### 8.2.4 实验结果
 
-待填写数据包测试、局部评分和必要截图。
+专项运行 `./grade-lab-net txone arp_rx ip_rx` 后三项均为 `OK`。同时读取
+`packets.pcap`，可以看到 xv6 发出的 UDP 包、主机查询 xv6 地址的 ARP Request、
+xv6 返回的 ARP Reply，以及主机向 xv6 发送的 UDP 包，证明发送 DMA、接收中断
+和双向链路均已打通。
+
+<div align="center">
+<img src="report-assets/net-nic-grade-01.png" alt="E1000 NIC 专项评分与抓包结果" width="700">
+<br>图 8-1 E1000 NIC 专项评分与抓包结果
+</div>
 
 #### 8.2.5 分析讨论
 
-待填写环形队列不变式、资源回收和并发安全。
+描述符环的不变式是：软件只能填写带 `DD` 的 TX 描述符，只能消费带 `DD` 的
+RX 描述符；tail 推进后，对应槽位在设备完成前不能再次使用。发送成功意味着
+缓冲页所有权已经交给驱动，而不是意味着页面可以立即释放；接收则必须先为设备
+补上替换页，才能把旧页移交协议栈。锁、状态位、内存屏障和模运算分别解决并发
+提交、设备完成通知、CPU/设备可见顺序和环形回绕问题，四者缺一不可。
 
-### 8.3 问题与解决、心得及验收
+### 8.3 Part Two：UDP Receive
 
-待记录问题闭环、`make grade` 结果、截图和 commit。
+#### 8.3.1 端口绑定与队列设计
+
+内核建立 64 项静态端口表，每个已绑定端口维护独立 FIFO，最多缓存 16 个数据包。
+所有绑定状态、队首队尾和计数由 `netlock` 保护。静态上限避免网络输入无限占用
+物理页；独立队列则防止某个繁忙端口阻塞其他端口。重复 `bind(port)` 保持幂等，
+`unbind(port)` 先在锁内撤销绑定、摘下队列并唤醒等待者，再在锁外逐页释放，避免
+长时间持锁。
+
+为了不再为链表节点额外申请物理页，`struct udp_packet` 元数据存放在接收缓冲页
+末尾。E1000 配置的帧缓冲上限约为 2 KiB，而页面为 4 KiB；入队前仍显式检查
+帧长不会覆盖页尾元数据。节点记录源 IP、源端口、负载偏移和长度，数据本身继续
+留在原 RX 页中，实现从驱动到用户进程的一页式所有权转移。
+
+#### 8.3.2 IPv4/UDP 接收与阻塞唤醒
+
+`ip_rx()` 按顺序验证以太网帧边界、IPv4 版本、可变 IP 头长、IP 总长度、UDP
+协议号和 UDP 长度。网络字段使用 `ntohs()`、`ntohl()` 转为主机字节序。畸形包、
+非 UDP 包、未绑定端口以及队列已满的包统一进入释放路径；有效包按目标端口入队，
+随后以队列地址为 channel 调用 `wakeup()`。
+
+`sys_recv()` 在持有同一把 `netlock` 时检查队列。队列为空时调用
+`sleep(queue, &netlock)`，该接口以原子方式释放锁并睡眠，避免在“检查为空”和
+“进入睡眠”之间丢失网络中断的唤醒。出队后先释放锁，再用 `copyout()` 返回源
+地址、源端口和不超过 `maxlen` 的 UDP 负载，最后释放数据包页。若进程被杀死、
+端口已解绑或任一用户地址复制失败，则返回 `-1`，同时保证已出队页面不会泄漏。
+
+```text
+E1000 RX 中断 → net_rx() → ip_rx()
+  → 校验 IPv4/UDP 头与长度
+  → 按 dport 查找端口队列
+  → FIFO 入队并 wakeup(queue)
+  → sys_recv() 被唤醒并出队
+  → copyout() 返回源信息和 UDP payload
+  → kfree() 释放接收页
+```
+
+#### 8.3.3 资源回收与回归验证
+
+发送侧同时补齐失败回收：`sys_send()` 和 ARP 回复只有在 `e1000_transmit()`
+成功后才把缓冲页所有权交给驱动，TX 环已满时由调用者立即 `kfree()`。接收侧的
+所有丢包分支、`copyout()` 失败和解绑清队列也都释放相应页面。完整 `nettest`
+中的 `free` 项用于检查网络测试结束后空闲物理页数量，能够发现这些低频错误路径
+上的泄漏。
+
+七项发送、ARP、IP 与多轮 ping 回归全部通过：
+
+<div align="center">
+<img src="report-assets/net-udp-grade-01.png" alt="UDP Receive 七项回归评分" width="700">
+<br>图 8-2 UDP Receive 七项回归评分
+</div>
+
+### 8.4 问题闭环与最终验收
+
+| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
+|---|---|---|---|
+| TX 环回绕后页面泄漏或过早释放 | 页面在提交后仍由设备 DMA 使用 | 只在槽位再次出现 `DD` 时释放上一页 | `txone` 和 `free` 通过 |
+| 一次中断后仍有已完成 RX 包滞留 | 中断处理只消费一个描述符 | 循环处理连续的 `DD` 描述符 | `arp_rx`、`ip_rx` 通过 |
+| 接收队列为空时发生丢失唤醒 | 检查队列和睡眠不是原子操作 | 使用同一 `netlock` 配合 `sleep/wakeup` | `ping0` 至 `ping3` 通过 |
+| 畸形长度造成越界解析 | IP/UDP 长度来自不可信网络输入 | 分层校验版本、头长、总长和实际帧边界 | 全量网络测试通过 |
+| TX 失败或端口解绑后页面泄漏 | 缓冲页所有权在错误路径不明确 | 所有移交失败、丢包和清队列路径统一释放 | `free: OK` |
+| 首次完整评分 DNS 地址不符 | 系统代理改写宿主 DNS 解析结果 | 临时关闭代理后从干净状态重新评分 | `dns: OK`，171/171 |
+
+首次完整评分时，协议栈已经正确收到了 DNS 响应，但宿主代理把
+`pdos.csail.mit.edu` 解析为 `198.18.0.158`，与测试固定期待的
+`128.52.129.126` 不同。关闭代理后重新运行 `make grade`，DNS、内存释放和时间
+检查均通过，最终得分为 171/171。这一过程也说明网络实验需要区分内核协议实现
+错误和宿主网络环境差异，不能为了迎合测试在内核中伪造 DNS 结果。
+
+关键提交如下：
+
+| 提交 | 内容 |
+|---|---|
+| `3edc8d7` | 实现 E1000 发送、接收描述符环和缓冲区所有权管理 |
+| `8096c80` | 实现 UDP 端口队列、阻塞接收、报文校验和失败回收 |
+| `d9ad0dc` | 记录 6 小时实际用时并完成验收 |
+
+<div align="center">
+<img src="report-assets/net-grade-final-01.png" alt="Network Lab 完整评分 171/171" width="351">
+<br>图 8-3 Network Lab 完整评分结果 171/171
+</div>
+
+本 Lab 将并发同步和资源生命周期落实到了硬件与软件的边界：描述符状态决定
+CPU 与网卡何时能够重新使用同一槽位，端口队列决定中断生产者和进程消费者如何
+交接数据，页面所有权则贯穿 DMA、协议解析、排队、复制和释放全过程。相比只让
+正常路径通过，完整实现更重要的是让环满、内存不足、畸形包、解绑和复制失败等
+路径仍保持状态一致且不泄漏。
 
 ## 9. Lab lock：Locking
 
@@ -1228,11 +1369,17 @@ trampoline。COW 进一步利用只读 PTE 主动制造写缺页，在 `vmfault(
 
 ### 12.3 并发、锁与资源生命周期
 
-待综合 net、lock 和 fs 填写。
+Network Lab 同时展示了两类生产者—消费者同步。E1000 描述符环由 CPU 与设备
+并发访问，软件根据 `DD` 判断设备是否完成，并用内存屏障保证描述符内容先于
+tail 更新可见；UDP 端口队列则由中断接收路径生产、用户进程消费，通过
+`netlock` 和 `sleep/wakeup` 保证队列不变式与阻塞唤醒不丢失。两条路径共同遵循
+缓冲页所有权规则：每个时刻只能有一个组件负责最终释放页面，成功移交后原持有者
+不再释放，移交失败则立即回收。后续 lock 和 fs Lab 完成后，再把这种局部锁设计
+与缓存、磁盘日志的并发策略进行比较。
 
 ### 12.4 各 Lab 之间的联系
 
-前五个已完成 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
+前六个已完成 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
 syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继续下降到支撑进程
 隔离的地址转换和物理页生命周期。`attack` 能泄露秘密的根因正是物理页重用时
 没有清零，而 pgtbl Lab 的 `kalloc`、`uvmalloc`、`uvmcopy` 和 `uvmunmap`
@@ -1241,6 +1388,10 @@ syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继
 同步系统调用链和异步时钟中断下的控制流保存与恢复。
 COW 在这些基础上把页表权限、页错误和物理页生命周期组合成延迟复制机制，展示
 了虚拟内存如何用一次额外的间接层换取更低的 fork 时间和内存开销。
+net Lab 则把系统边界从用户/内核继续延伸到外部设备：中断机制接收网卡事件，
+页分配器提供 DMA 缓冲区，锁和睡眠唤醒连接异步中断与阻塞系统调用，`copyout()`
+最终把 UDP 数据交还用户地址空间。此前各 Lab 中分别学习的陷阱、内存、并发和
+系统调用机制，因此在一条完整的数据包接收链上组合起来。
 
 ## 13. 总结与心得
 
@@ -1258,8 +1409,9 @@ COW 在这些基础上把页表权限、页错误和物理页生命周期组合�
 6. MIT 6.1810 Lab: Page tables: <https://pdos.csail.mit.edu/6.828/2025/labs/pgtbl.html>
 7. MIT 6.1810 Lab: Traps: <https://pdos.csail.mit.edu/6.828/2025/labs/traps.html>
 8. MIT 6.1810 Lab: Copy-on-Write Fork: <https://pdos.csail.mit.edu/6.828/2025/labs/cow.html>
-9. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
-10. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
+9. MIT 6.1810 Lab: Network Driver: <https://pdos.csail.mit.edu/6.828/2025/labs/net.html>
+10. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
+11. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
 
 <!-- 参考同学报告时只借鉴结构；若最终正文实际引用了其观点，必须在此显式标注。 -->
 
@@ -1277,7 +1429,7 @@ COW 在这些基础上把页表权限、页错误和物理页生命周期组合�
 | pgtbl | `pgtbl` | `6097a95`、`781903e`、`d8c29ac`、`b7b1643`、`364eff0` | 41/41 |
 | traps | `traps` | `c572d63`、`59b7b78`、`5abddb9`、`895895c` | 95/95 |
 | cow | `cow` | `ecafd04`、`7fc6398` | 130/130 |
-| net | `net` | 待填写 | 待填写 |
+| net | `net` | `3edc8d7`、`8096c80`、`d9ad0dc` | 171/171 |
 | lock | `lock` | 待填写 | 待填写 |
 | fs | `fs` | 待填写 | 待填写 |
 | mmap | `mmap` | 待填写 | 待填写 |
@@ -1317,6 +1469,9 @@ COW 在这些基础上把页表权限、页错误和物理页生命周期组合�
 | `report-assets/traps-alarm-grade-01.png` | 6.4 | Alarm 四项测试及实际输出 |
 | `report-assets/traps-grade-final-01.png` | 6.5 | traps 完整评分 95/95 |
 | `report-assets/cow-grade-final-01.png` | 7.6 | COW 完整评分 130/130 |
+| `report-assets/net-nic-grade-01.png` | 8.2 | E1000 NIC 专项评分与抓包结果 |
+| `report-assets/net-udp-grade-01.png` | 8.3 | UDP Receive 七项回归评分 |
+| `report-assets/net-grade-final-01.png` | 8.4 | net 完整评分 171/171 |
 
 ### 附录 C：答辩演示命令
 
@@ -1364,7 +1519,16 @@ git switch cow
 ./grade-lab-cow simple three file forkfork 'usertests:'
 ```
 
+Network Lab：
+
+```bash
+git switch net
+./grade-lab-net txone arp_rx ip_rx ping0 ping1 ping2 ping3 dns free
+tcpdump -nn -r packets.pcap | sed -n '1,8p'
+```
+
 预期分别看到 sandbox 的拒绝/例外行为、`attack` 输出秘密，以及
 `pgtbltest: all tests succeeded`；traps 演示应看到三层内核调用链及 Alarm 的
 test0 至 test3 全部为 `OK`；COW 演示应看到四项 cowtest 和三项 usertests
-全部为 `OK`。退出 QEMU 时先按 `Ctrl+A`，再按 `X`。
+全部为 `OK`；Network 演示应看到九项网络测试全部为 `OK`，抓包中包含 UDP 和
+ARP 双向数据包。退出 QEMU 时先按 `Ctrl+A`，再按 `X`。
