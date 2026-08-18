@@ -82,7 +82,7 @@ xv6 是一个面向教学的 Unix 风格操作系统。本项目以 MIT 6.1810 2
 | traps | Traps | 已完成 | 95/95 | 已完成 |
 | cow | Copy-on-write | 已完成 | 130/130 | 已完成 |
 | net | Network driver | 已完成 | 171/171 | 已完成 |
-| lock | Locking | 未开始 | — | 未开始 |
+| lock | Locking | 已完成 | 100/100 | 已完成 |
 | fs | File system | 未开始 | — | 未开始 |
 | mmap | Memory mapping | 未开始 | — | 未开始 |
 
@@ -1238,39 +1238,183 @@ CPU 与网卡何时能够重新使用同一槽位，端口队列决定中断生�
 
 ### 9.1 实验概述
 
-| 官方分支 | 主题 | 具体任务 |
-|---|---|---|
-| `lock` | 自旋锁、并行性和锁竞争 | 待按 2025 版填写 |
+| 项目 | 内容 |
+|---|---|
+| 官方分支 | `lock` |
+| 实验主题 | 多核内存分配、锁竞争和写者优先读写锁 |
+| 具体任务 | Memory allocator、Read-write lock |
+| 基线提交 | `af12b48` |
+| 完成提交 | `17aa0bc` |
+| 实际用时 | 7 小时 |
+| 最终评分 | 100/100 |
 
-### 9.2 任务一：待填写官方任务名
+本 Lab 关注的不是简单地“加锁保证正确”，而是在保持共享状态不变式的同时提高
+多核并行度。第一项把全局物理页空闲链表拆成每 CPU 独立链表，使常见的本地
+分配和释放互不竞争；第二项实现写者优先的读写自旋锁，让多个只读临界区并发，
+同时避免持续到来的读者使写者长期饥饿。
+
+### 9.2 Memory allocator：每 CPU 空闲链表
 
 #### 9.2.1 实验目的
 
-待填写。
+原始 `kalloc()` 和 `kfree()` 共用唯一的 `kmem.freelist` 和 `kmem.lock`。多核上的
+进程频繁扩张、收缩地址空间时，即使它们操作的是不同物理页，也必须在同一把锁
+上串行。`kalloctest` 通过统计 `acquire()` 中 test-and-set 失败次数量化这种竞争。
+本任务要求建立每 CPU 空闲链表，并在本地链表耗尽时安全地从其他 CPU 偷取页面。
 
-#### 9.2.2 前期准备、相关原理与调用链
+#### 9.2.2 数据结构与本地快速路径
 
-待填写共享状态、锁保护不变式和竞争来源。
+分配器改为包含 `NCPU` 个槽位的数组，每个槽位拥有独立的 `kmem` 锁和空闲链表。
+所有锁名均以 `kmem` 开头，使课程统计系统能够汇总它们的竞争次数。
+
+```text
+kfree(pa)
+  → push_off()，读取 cpuid()
+  → 获取 kmem[id].lock
+  → 页面插入当前 CPU freelist 表头
+  → 释放锁并 pop_off()
+
+kalloc()
+  → push_off()，读取 cpuid()
+  → 从 kmem[id].freelist 取一页
+  → 本地为空时进入跨 CPU 偷取路径
+  → pop_off()，返回页面
+```
+
+`cpuid()` 的结果只在中断关闭期间可靠；若中途发生调度并迁移到另一 CPU，继续
+访问旧编号对应的链表会破坏“常见操作保持本地”的性能目标。因此本实现从读取
+CPU 编号到完成分配器操作一直保持 `push_off()`，内部普通自旋锁造成的嵌套关闭
+由 xv6 的 `noff` 计数正确配对。
 
 #### 9.2.3 设计与实现步骤
 
-待填写。
+系统启动时初始化全部 `kmem[i].lock`，`freerange()` 仍按官方提示把初始空闲页
+交给执行初始化的 CPU。其他 CPU 第一次需要页面时才进行偷取。普通路径只持有
+一把本地锁，因此不同 CPU 上的高频单页分配和释放可以真正并行。
+
+本地链表为空时，分配器依次检查其他 CPU。为了缩短跨 CPU 临界区，最终实现把
+来源链表整体转移到本地，并立即从表头取出一页，操作本身只需常数次指针赋值。
+转移必须同时保护来源与目标链表；两把锁统一按 CPU 编号从小到大获取、反向释放，
+避免 CPU A 从 B 偷取、同时 B 从 A 偷取时形成循环等待。
+
+```text
+本地 freelist 为空
+  → 选择 donor CPU
+  → 按 min(id, donor)、max(id, donor) 顺序获取两把锁
+  → donor 非空：整条链表转给本地，并取出第一页
+  → 反向释放两把锁
+  → donor 为空：继续检查下一 CPU
+```
+
+核心不变式是：每个空闲物理页始终位于某一条受锁保护的链表。整链表转移期间
+同时持有两端锁，所以其他 CPU 不会观察到页面既不属于来源、也不属于目标的状态。
 
 #### 9.2.4 实验结果
 
-待填写正确性、竞争统计和多核结果。
+`./grade-lab-lock kalloctest` 的四项测试全部通过：test1 检查并发单页分配竞争，
+test2 检查低内存下反复统计不会丢页，test3 检查并发分配、回收与偷取的正确性，
+test4 检查大进程耗尽内存时的竞争性能。`usertests sbrkmuch` 也通过，证明所有
+物理内存仍可被完整分配。
+
+<div align="center">
+<img src="report-assets/lock-kalloc-grade-01.png" alt="每 CPU 内存分配器专项评分" width="720">
+<br>图 9-1 Memory allocator 五项专项测试全部通过
+</div>
 
 #### 9.2.5 分析讨论
 
-待填写拆锁后的并行性、正确性与性能权衡。
+初版每次最多偷取 64 页，虽然 test1 至 test3 正确，但 test4 新增竞争约 54,715，
+超过 30,000 的评分阈值。把批次增至 1024 页又使来源锁内遍历时间过长，竞争
+进一步上升。这表明减少加锁次数不等于降低竞争，临界区长度同样重要。
 
-### 9.3 其他任务
+随后尝试在来源锁内 O(1) 摘下整条链表、解锁后再挂入本地，但摘下到挂入之间，
+页面只存在于当前调用的局部变量中。其他 CPU 可能恰好检查完所有空链表并返回
+内存不足，`kalloctest` 因 `sbrk()` 返回 `-1` 后写地址 `0x3` 而失败。最终采用
+固定顺序双锁下的 O(1) 转移，同时解决页面可见性、死锁与临界区长度三个问题，
+test4 的竞争计数降至评分阈值以内。
 
-待按 9.2 的统一结构补齐。
+### 9.3 Read-write lock：写者优先
+
+#### 9.3.1 状态设计与语义
+
+普通自旋锁只允许一个持有者，即使多个临界区都只读取共享数据也会互相阻塞。
+读写锁需要满足：任意数量读者可以并发；写者与所有读者、其他写者互斥；一旦有
+写者开始等待，后来的读者不能继续插队。
+
+`struct rwspinlock` 使用三个原子字段：`readers` 记录活动读者数，`writer` 表示
+是否有活动写者，`waiting_writers` 记录已经宣布等待的写者数。所有状态使用 GCC
+`__atomic` 顺序一致操作，直接建立跨 CPU 的全序与内存屏障，避免普通读写的数据
+竞争和弱内存序下的状态错判。
+
+#### 9.3.2 读者协议与竞态封闭
+
+读者先等待 `writer == 0 && waiting_writers == 0`，再原子增加 `readers`。但首次
+检查和增加计数之间可能恰好有写者宣布等待，所以增加后必须再次检查两个写者状态：
+若仍为零则成功获得读锁；否则撤销读者计数并重试。
+
+```text
+等待 writer == 0 且 waiting_writers == 0
+  → readers++
+  → 再次检查写者状态
+      ├─ 仍无写者：获得读锁
+      └─ 写者已出现：readers--，重新等待
+```
+
+二次检查保证两种合法顺序：读者若先完成登记，写者会等待它释放；写者若先宣布，
+读者就撤销并让路。不存在双方都认为自己已经获得锁的中间状态。
+
+#### 9.3.3 写者协议与优先级
+
+写者首先增加 `waiting_writers`，从这一刻起后续读者都会停在入口。随后通过原子
+exchange 竞争唯一的 `writer` 标志，成功后等待既有 `readers` 降为零，再减少
+自己的等待计数并进入写临界区。释放时原子清除 `writer`。若还有其他写者等待，
+`waiting_writers` 仍大于零，读者继续等待，因此多个排队写者也不会被读者穿插。
+
+公开的读写锁接口沿用框架提供的 `push_off()`/`pop_off()`，防止持锁代码被迁移，
+并允许通过嵌套中断计数在同一 CPU 上同时持有多把不同的读写锁。
+
+#### 9.3.4 专项验证
+
+`rwlktest` 覆盖并发读、读写互斥、写写互斥、单写者优先、多写者优先和同时持有
+多把锁。专项测试连续运行四次均通过，四个 CPU 都返回 0：
+
+<div align="center">
+<img src="report-assets/lock-rwlock-grade-01.png" alt="写者优先读写锁专项评分" width="760">
+<br>图 9-2 Read-write lock 多写者优先测试与四 CPU 结果
+</div>
 
 ### 9.4 问题与解决、心得及验收
 
-待记录问题闭环、默认多核 `make grade` 结果、截图和 commit。
+| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
+|---|---|---|---|
+| 单一空闲链表竞争严重 | 所有 CPU 串行获取同一 `kmem.lock` | 每 CPU 独立链表和锁 | kalloctest test1 通过 |
+| 小批量偷取仍频繁竞争 | 大内存申请反复访问来源 CPU 锁 | O(1) 整链表转移 | test4 通过 |
+| 页面转移时瞬时不可见 | 摘下来源链表后先解锁、稍后才挂入目标 | 双锁覆盖整个所有权转移 | test2、test3 通过 |
+| 两个 CPU 交叉偷取死锁 | 双锁获取顺序可能相反 | 始终按 CPU 编号递增获取 | 高负载测试无死锁 |
+| 读者在写者登记窗口插队 | 检查状态与增加读者数不是单个原子动作 | 登记后二次检查并在冲突时撤销 | writer priority 通过 |
+| 多写者之间被读者穿插 | 只记录活动写者，不记录排队写者 | `waiting_writers` 阻止新读者 | 多写者优先连续通过 |
+
+关键提交如下：
+
+| 提交 | 内容 |
+|---|---|
+| `3bf1bcb` | 实现每 CPU 空闲链表、固定锁序和跨 CPU 整链表转移 |
+| `d68c3cc` | 实现写者优先读写自旋锁 |
+| `17aa0bc` | 记录 7 小时实际用时并完成验收 |
+
+从干净状态运行 `make grade`，内存分配器四项、sbrkmuch、rwlktest、完整
+usertests 和时间检查全部通过，最终得分 100/100：
+
+<div align="center">
+<img src="report-assets/lock-grade-final-01.png" alt="Lock Lab 完整评分 100/100" width="374">
+<br>图 9-3 Lock Lab 完整评分结果 100/100
+</div>
+
+本 Lab 的核心认识是：锁的正确性只解决“能否运行”，锁的粒度、持有时间和获取
+顺序才决定多核程序“能否并行”。每 CPU 链表以空间分区减少共享，双锁协议维护
+跨分区转移不变式；读写锁则利用更细的访问语义扩大并发，同时用等待写者状态
+补上公平性。性能优化必须和状态可见性一起设计，不能以短暂破坏不变式换取更短
+的临界区。
 
 ## 10. Lab fs：File system
 
@@ -1374,12 +1518,15 @@ Network Lab 同时展示了两类生产者—消费者同步。E1000 描述符�
 tail 更新可见；UDP 端口队列则由中断接收路径生产、用户进程消费，通过
 `netlock` 和 `sleep/wakeup` 保证队列不变式与阻塞唤醒不丢失。两条路径共同遵循
 缓冲页所有权规则：每个时刻只能有一个组件负责最终释放页面，成功移交后原持有者
-不再释放，移交失败则立即回收。后续 lock 和 fs Lab 完成后，再把这种局部锁设计
-与缓存、磁盘日志的并发策略进行比较。
+不再释放，移交失败则立即回收。Lock Lab 进一步说明，共享状态正确并不意味着
+并行度足够：把物理页按 CPU 分区后，常见分配路径不再争用全局锁；跨分区转移
+则依靠固定双锁顺序同时保证可见性和无死锁。读写锁又把访问区分为读与写，通过
+活动读者、活动写者和等待写者三个状态，在扩大读并行度的同时保证写者优先。
+后续 fs Lab 完成后，再将这些策略与缓存和磁盘日志的锁设计进行比较。
 
 ### 12.4 各 Lab 之间的联系
 
-前六个已完成 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
+前七个已完成 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
 syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继续下降到支撑进程
 隔离的地址转换和物理页生命周期。`attack` 能泄露秘密的根因正是物理页重用时
 没有清零，而 pgtbl Lab 的 `kalloc`、`uvmalloc`、`uvmcopy` 和 `uvmunmap`
@@ -1392,6 +1539,10 @@ net Lab 则把系统边界从用户/内核继续延伸到外部设备：中断�
 页分配器提供 DMA 缓冲区，锁和睡眠唤醒连接异步中断与阻塞系统调用，`copyout()`
 最终把 UDP 数据交还用户地址空间。此前各 Lab 中分别学习的陷阱、内存、并发和
 系统调用机制，因此在一条完整的数据包接收链上组合起来。
+lock Lab 回到这些公共内核机制的并发基础，直接优化 COW、页表、网络缓冲区等
+路径共同依赖的物理页分配器，并通过读写锁展示“访问语义比互斥更细”时可获得的
+并行性。它把前面实验中作为工具使用的锁，变成了需要证明不变式、分析交错顺序
+和测量竞争开销的研究对象。
 
 ## 13. 总结与心得
 
@@ -1410,8 +1561,9 @@ net Lab 则把系统边界从用户/内核继续延伸到外部设备：中断�
 7. MIT 6.1810 Lab: Traps: <https://pdos.csail.mit.edu/6.828/2025/labs/traps.html>
 8. MIT 6.1810 Lab: Copy-on-Write Fork: <https://pdos.csail.mit.edu/6.828/2025/labs/cow.html>
 9. MIT 6.1810 Lab: Network Driver: <https://pdos.csail.mit.edu/6.828/2025/labs/net.html>
-10. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
-11. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
+10. MIT 6.1810 Lab: Locks: <https://pdos.csail.mit.edu/6.828/2025/labs/lock.html>
+11. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
+12. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
 
 <!-- 参考同学报告时只借鉴结构；若最终正文实际引用了其观点，必须在此显式标注。 -->
 
@@ -1430,7 +1582,7 @@ net Lab 则把系统边界从用户/内核继续延伸到外部设备：中断�
 | traps | `traps` | `c572d63`、`59b7b78`、`5abddb9`、`895895c` | 95/95 |
 | cow | `cow` | `ecafd04`、`7fc6398` | 130/130 |
 | net | `net` | `3edc8d7`、`8096c80`、`d9ad0dc` | 171/171 |
-| lock | `lock` | 待填写 | 待填写 |
+| lock | `lock` | `3bf1bcb`、`d68c3cc`、`17aa0bc` | 100/100 |
 | fs | `fs` | 待填写 | 待填写 |
 | mmap | `mmap` | 待填写 | 待填写 |
 
@@ -1445,8 +1597,10 @@ net Lab 则把系统边界从用户/内核继续延伸到外部设备：中断�
 | pgtbl | `make grade` | 41/41 | 图 5-4 |
 | traps | `make grade` | 95/95 | 图 6-4 |
 | cow | `make grade` | 130/130 | 图 7-1 |
+| net | `make grade` | 171/171 | 图 8-3 |
+| lock | `make grade` | 100/100 | 图 9-3 |
 
-其余 Lab 完成后继续补充。
+fs 和 mmap Lab 完成后继续补充。
 
 ### 附录 B：报告图片索引
 
@@ -1472,6 +1626,9 @@ net Lab 则把系统边界从用户/内核继续延伸到外部设备：中断�
 | `report-assets/net-nic-grade-01.png` | 8.2 | E1000 NIC 专项评分与抓包结果 |
 | `report-assets/net-udp-grade-01.png` | 8.3 | UDP Receive 七项回归评分 |
 | `report-assets/net-grade-final-01.png` | 8.4 | net 完整评分 171/171 |
+| `report-assets/lock-kalloc-grade-01.png` | 9.2 | 每 CPU 内存分配器五项专项测试 |
+| `report-assets/lock-rwlock-grade-01.png` | 9.3 | 写者优先读写锁与四 CPU 结果 |
+| `report-assets/lock-grade-final-01.png` | 9.4 | lock 完整评分 100/100 |
 
 ### 附录 C：答辩演示命令
 
@@ -1527,8 +1684,18 @@ git switch net
 tcpdump -nn -r packets.pcap | sed -n '1,8p'
 ```
 
+Lock Lab：
+
+```bash
+git switch lock
+./grade-lab-lock kalloctest
+./grade-lab-lock rwlktest
+tail -n 18 xv6.out
+```
+
 预期分别看到 sandbox 的拒绝/例外行为、`attack` 输出秘密，以及
 `pgtbltest: all tests succeeded`；traps 演示应看到三层内核调用链及 Alarm 的
 test0 至 test3 全部为 `OK`；COW 演示应看到四项 cowtest 和三项 usertests
 全部为 `OK`；Network 演示应看到九项网络测试全部为 `OK`，抓包中包含 UDP 和
-ARP 双向数据包。退出 QEMU 时先按 `Ctrl+A`，再按 `X`。
+ARP 双向数据包；Lock 演示应看到分配器五项测试全部通过，以及读写锁四个 CPU
+均返回 0、最终 `4/4 CPUs succeeded`。退出 QEMU 时先按 `Ctrl+A`，再按 `X`。
