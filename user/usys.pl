@@ -36,6 +36,7 @@ entry("unlink");
 entry("fstat");
 entry("link");
 entry("mkdir");
+entry("symlink");
 entry("chdir");
 entry("dup");
 entry("getpid");
