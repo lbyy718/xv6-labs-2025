@@ -80,7 +80,7 @@ xv6 是一个面向教学的 Unix 风格操作系统。本项目以 MIT 6.1810 2
 | syscall | System calls | 已完成 | 45/45 | 已完成 |
 | pgtbl | Page tables | 已完成 | 41/41 | 已完成 |
 | traps | Traps | 已完成 | 95/95 | 已完成 |
-| cow | Copy-on-write | 未开始 | — | 未开始 |
+| cow | Copy-on-write | 已完成 | 130/130 | 已完成 |
 | net | Network driver | 未开始 | — | 未开始 |
 | lock | Locking | 未开始 | — | 未开始 |
 | fs | File system | 未开始 | — | 未开始 |
@@ -926,35 +926,138 @@ handler 调用 `sigreturn()` 后，内核恢复保存的完整 trapframe 并清�
 
 ### 7.1 实验概述
 
-| 官方分支 | 主题 | 具体任务 |
-|---|---|---|
-| `cow` | 页错误、物理页引用计数与写时复制 | 待按 2025 版填写 |
+| 项目 | 内容 |
+|---|---|
+| 官方分支 | `cow` |
+| 实验主题 | 写时复制 fork、页错误和共享物理页生命周期 |
+| 具体任务 | Implement copy-on-write fork |
+| 基线提交 | `cf0eb5b` |
+| 完成提交 | `7fc6398` |
+| 实际用时 | 4 小时 |
+| 最终评分 | 130/130 |
 
-### 7.2 任务一：待填写官方任务名
+原始 `fork()` 通过 `uvmcopy()` 为子进程逐页分配物理内存并复制父进程内容。
+当父进程占用超过一半物理内存时，即使子进程马上调用 `exec()`，fork 也可能因
+无法再复制一份完整地址空间而失败。COW 把复制推迟到父子中的某一方首次写入，
+没有被写过的页面始终共享，从而同时减少 fork 延迟和内存峰值。
 
-#### 7.2.1 实验目的
+### 7.2 COW fork：共享父进程物理页
 
-待填写。
+#### 7.2.1 PTE 状态设计
 
-#### 7.2.2 前期准备、相关原理与调用链
+父子共享页面后必须清除 `PTE_W`，使 CPU 在写入时产生 store page fault。但
+“因 COW 临时只读”和“代码段原本只读”不能混为一谈，否则写代码段也会被错误
+升级为可写。本实现使用 RISC-V PTE 的 RSW 软件保留位记录：
 
-待填写 fork、页表权限、页错误和物理页生命周期。
+```c
+#define PTE_COW (1L << 8)
+```
 
-#### 7.2.3 设计与实现步骤
+只有原 PTE 含 `PTE_W` 时，`uvmcopy()` 才清除写权限并设置 `PTE_COW`；代码段
+等原生只读页不设置该标志，非法写入仍会终止进程。`PTE_COW` 位属于
+`PTE_FLAGS()` 保留的低 10 位，可随映射复制而不会影响硬件地址转换。
 
-待填写。
+#### 7.2.2 fork 映射流程
 
-#### 7.2.4 实验结果
+修改后的 `uvmcopy()` 不再调用 `kalloc()` 和 `memmove()` 复制每个用户页，而是
+把同一物理地址映射进子页表：
 
-待填写手工测试、压力测试和局部评分。
+```text
+遍历父进程有效 PTE
+  → 原页面可写：父 PTE 清 W、设置 COW
+  → 子页表映射同一 PA 和相同只读/COW 权限
+  → 物理页引用计数加 1
+  → 完成后刷新当前 hart 的 TLB
+```
 
-#### 7.2.5 分析讨论
+父 PTE 也必须变为只读，否则父进程可以绕过 page fault 直接修改共享页面。
+修改页表后调用 `sfence_vma()` 清除旧的可写 TLB 项，保证后续写入依据新权限
+重新查询页表。
 
-待填写引用计数、并发安全和异常路径。
+### 7.3 写缺页：按需创建私有副本
 
-### 7.3 问题与解决、心得及验收
+`usertrap()` 已把 load/store page fault 交给 `vmfault()`。本实现保留原有懒分配
+能力，并增加对“有效、用户可访问、含 `PTE_COW` 的写故障”的处理：
 
-待记录问题闭环、`make grade` 结果、截图和 commit。
+```text
+store page fault
+  ├─ PTE 不是 COW → 非法写入，返回失败并终止进程
+  └─ PTE 是 COW
+       ├─ 引用计数为 1 → 直接清 COW、恢复 PTE_W
+       └─ 引用计数大于 1
+            → kalloc() 新页
+            → 复制原页全部 4096 字节
+            → 当前 PTE 改指新页并恢复写权限
+            → 旧页引用计数减 1
+```
+
+引用数为 1 时说明其他共享者已经退出或拆分页，当前进程已是唯一所有者，不必
+进行无意义的物理复制。若 `kalloc()` 失败，`vmfault()` 返回 0，用户陷阱路径
+会终止当前进程，而不会让它继续写共享页面。更新 PTE 后再次执行 `sfence_vma()`，
+使故障指令重试时看到新的可写映射。
+
+### 7.4 copyout：处理内核发起的用户内存写入
+
+用户指令写只读页会触发硬件 page fault，但 `read()`、管道和文件系统等内核
+代码通过 `copyout()` 直接写用户物理地址，不会触发用户态 store fault。如果
+仍按旧逻辑处理，子进程读管道时会直接修改与父进程共享的 `buf` 页面。
+
+因此 `copyout()` 在每页写入前检查 PTE：普通可写页直接复制；COW 页调用同一个
+`vmfault(..., read=0)` 路径先取得私有页；原生只读页返回 `-1`。用户缺页和内核
+代写共享同一套拆分规则，避免两份实现产生权限或引用计数差异。`cowtest` 的
+`file` 项专门验证该路径，子进程收到管道数据后，父进程缓冲区仍保持原值。
+
+### 7.5 物理页引用计数与并发
+
+共享映射使一个物理页可能同时出现在多个用户页表中，原有 `uvmunmap()` 每次都
+直接 `kfree()` 会导致第一个进程退出时过早回收页面。实现增加固定引用计数数组：
+
+```text
+index = (pa - KERNBASE) / PGSIZE
+kalloc()       → count = 1
+COW fork 映射  → count++
+解除一次映射  → count--
+count == 0     → 填充垃圾值并放回 freelist
+```
+
+数组覆盖 `[KERNBASE, PHYSTOP)` 内所有可分配页，由独立的 `krefs` 自旋锁保护。
+初始化 freelist 时先把每页引用数设为 1，再通过统一的 `kfree()` 路径递减并加入
+空闲链表；以后所有内核页和用户页都遵守同一计数不变式。引用数大于零时
+`kfree()` 只递减而不破坏页面内容。
+
+锁使多个进程同时 fork、退出和拆分同一共享页时，递增与递减不会丢失。测试中的
+`forkfork` 连续创建多层子进程并让它们交错退出，既检查引用计数竞争，也检查
+父进程的共享内容始终未被修改。
+
+### 7.6 问题闭环与最终验收
+
+| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
+|---|---|---|---|
+| 大地址空间 fork 失败 | 原实现立即复制全部物理页，内存峰值接近两倍 | 父子共享页并延迟复制 | 两次 `simple: OK` |
+| 代码段可能被错误改成可写 | 仅凭只读位不能判断页面原始权限 | 只给原本可写页设置 `PTE_COW` | usertests 全部通过 |
+| 子进程退出后父进程访问损坏 | 共享页被第一次 `kfree()` 提前回收 | 带锁引用计数归零后才进入 freelist | `three`、`forkfork` 通过 |
+| 内核写绕过 COW page fault | `copyout()` 直接访问 PA，不执行用户 store | 在 copyout 中显式调用 COW 拆分页逻辑 | `file`、copyout 通过 |
+| PTE 已只读但写入未触发 fault | TLB 可能缓存 fork 前的可写权限 | 修改映射后执行 `sfence_vma()` | 多进程写隔离通过 |
+
+关键提交如下：
+
+| 提交 | 内容 |
+|---|---|
+| `ecafd04` | 实现 COW 映射、写缺页、copyout 和引用计数 |
+| `7fc6398` | 记录 4 小时实际用时并完成验收 |
+
+从干净状态运行 `make grade`，`cowtest` 的 `simple`、`three`、`file`、`forkfork`，
+`usertests` 的 copyin、copyout 和全量回归，以及时间检查全部通过：
+
+<div align="center">
+<img src="report-assets/cow-grade-final-01.png" alt="COW Lab 完整评分 130/130" width="411">
+<br>图 7-1 COW Lab 完整评分结果 130/130
+</div>
+
+本 Lab 的核心不只是“发生错误时复制一页”，而是建立共享页从创建、并发引用、
+按需拆分到最后回收的完整生命周期。页表权限负责把普通写操作转化为内核可见的
+事件，RSW 位保存软件语义，引用计数保证资源存活，TLB 刷新保证硬件及时采用新
+权限；其中任一环节缺失都会表现为隔离破坏、内存泄漏或悬空映射。
 
 ## 8. Lab net：Network driver
 
@@ -1114,13 +1217,14 @@ Lab 则补齐了另一侧的入口和分派过程。完整链路为：用户 C �
 
 ### 12.2 进程、陷阱与虚拟内存的关系
 
-当前完成的 syscall 和 pgtbl Lab 已展示三者的基本关系：进程通过 `struct proc`
+当前完成的 syscall、pgtbl、traps 和 COW Lab 已展示三者的基本关系：进程通过 `struct proc`
 持有独立页表和 trapframe；用户态执行 `ecall` 或发生页错误时，硬件进入
 supervisor mode，trampoline 利用高地址处的 trapframe 映射保存上下文；内核
 处理完成后恢复用户页表和寄存器。`USYSCALL` 表明同一进程页表可同时包含普通
 用户页、用户只读的内核共享数据以及仅 supervisor 可访问的 trapframe 与
-trampoline。后续 traps、COW 和 mmap Lab 完成后再补充异常修复、共享物理页
-和延迟映射部分。
+trampoline。COW 进一步利用只读 PTE 主动制造写缺页，在 `vmfault()` 中把共享
+物理页拆分为私有副本，说明页错误既可能代表非法访问，也可以成为延迟执行内存
+操作的正常控制流。后续 mmap Lab 完成后再补充文件映射和延迟映射部分。
 
 ### 12.3 并发、锁与资源生命周期
 
@@ -1128,13 +1232,15 @@ trampoline。后续 traps、COW 和 mmap Lab 完成后再补充异常修复、�
 
 ### 12.4 各 Lab 之间的联系
 
-前四个已完成 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
+前五个已完成 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
 syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继续下降到支撑进程
 隔离的地址转换和物理页生命周期。`attack` 能泄露秘密的根因正是物理页重用时
 没有清零，而 pgtbl Lab 的 `kalloc`、`uvmalloc`、`uvmcopy` 和 `uvmunmap`
 进一步展示了这些页面如何分配、映射、复制和回收。traps 则解释了用户程序如何
 经 `ecall` 和 trapframe 穿过特权级边界，并通过 Backtrace 与 Alarm 分别观察
 同步系统调用链和异步时钟中断下的控制流保存与恢复。
+COW 在这些基础上把页表权限、页错误和物理页生命周期组合成延迟复制机制，展示
+了虚拟内存如何用一次额外的间接层换取更低的 fork 时间和内存开销。
 
 ## 13. 总结与心得
 
@@ -1151,8 +1257,9 @@ syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继
 5. MIT 6.1810 Lab: System calls: <https://pdos.csail.mit.edu/6.828/2025/labs/syscall.html>
 6. MIT 6.1810 Lab: Page tables: <https://pdos.csail.mit.edu/6.828/2025/labs/pgtbl.html>
 7. MIT 6.1810 Lab: Traps: <https://pdos.csail.mit.edu/6.828/2025/labs/traps.html>
-8. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
-9. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
+8. MIT 6.1810 Lab: Copy-on-Write Fork: <https://pdos.csail.mit.edu/6.828/2025/labs/cow.html>
+9. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
+10. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
 
 <!-- 参考同学报告时只借鉴结构；若最终正文实际引用了其观点，必须在此显式标注。 -->
 
@@ -1169,7 +1276,7 @@ syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继
 | syscall | `syscall` | `1c298e3`、`ee2117e`、`6cfe037`、`346d204`、`f031d96` | 45/45 |
 | pgtbl | `pgtbl` | `6097a95`、`781903e`、`d8c29ac`、`b7b1643`、`364eff0` | 41/41 |
 | traps | `traps` | `c572d63`、`59b7b78`、`5abddb9`、`895895c` | 95/95 |
-| cow | `cow` | 待填写 | 待填写 |
+| cow | `cow` | `ecafd04`、`7fc6398` | 130/130 |
 | net | `net` | 待填写 | 待填写 |
 | lock | `lock` | 待填写 | 待填写 |
 | fs | `fs` | 待填写 | 待填写 |
@@ -1185,6 +1292,7 @@ syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继
 | syscall | `make grade` | 45/45 | 图 4-4 |
 | pgtbl | `make grade` | 41/41 | 图 5-4 |
 | traps | `make grade` | 95/95 | 图 6-4 |
+| cow | `make grade` | 130/130 | 图 7-1 |
 
 其余 Lab 完成后继续补充。
 
@@ -1208,6 +1316,7 @@ syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继
 | `report-assets/traps-backtrace-grade-01.png` | 6.3 | Backtrace 评分和返回地址解析 |
 | `report-assets/traps-alarm-grade-01.png` | 6.4 | Alarm 四项测试及实际输出 |
 | `report-assets/traps-grade-final-01.png` | 6.5 | traps 完整评分 95/95 |
+| `report-assets/cow-grade-final-01.png` | 7.6 | COW 完整评分 130/130 |
 
 ### 附录 C：答辩演示命令
 
@@ -1248,6 +1357,14 @@ done
 ./grade-lab-traps alarm
 ```
 
+COW Lab：
+
+```bash
+git switch cow
+./grade-lab-cow simple three file forkfork 'usertests:'
+```
+
 预期分别看到 sandbox 的拒绝/例外行为、`attack` 输出秘密，以及
 `pgtbltest: all tests succeeded`；traps 演示应看到三层内核调用链及 Alarm 的
-test0 至 test3 全部为 `OK`。退出 QEMU 时先按 `Ctrl+A`，再按 `X`。
+test0 至 test3 全部为 `OK`；COW 演示应看到四项 cowtest 和三项 usertests
+全部为 `OK`。退出 QEMU 时先按 `Ctrl+A`，再按 `X`。
