@@ -83,7 +83,7 @@ xv6 是一个面向教学的 Unix 风格操作系统。本项目以 MIT 6.1810 2
 | cow | Copy-on-write | 已完成 | 130/130 | 已完成 |
 | net | Network driver | 已完成 | 171/171 | 已完成 |
 | lock | Locking | 已完成 | 100/100 | 已完成 |
-| fs | File system | 未开始 | — | 未开始 |
+| fs | File system | 已完成 | 100/100 | 已完成 |
 | mmap | Memory mapping | 未开始 | — | 未开始 |
 
 > 状态必须随实际进度更新，未完成的实验不得写成已完成。
@@ -1420,39 +1420,175 @@ usertests 和时间检查全部通过，最终得分 100/100：
 
 ### 10.1 实验概述
 
-| 官方分支 | 主题 | 具体任务 |
-|---|---|---|
-| `fs` | inode、块分配、目录和文件系统 | 待按 2025 版填写 |
+| 项目 | 内容 |
+|---|---|
+| 官方分支 | `fs` |
+| 实验主题 | inode 块映射、大文件存储与符号链接路径解析 |
+| 具体任务 | Large files、Symbolic links |
+| 基线提交 | `a95dec4` |
+| 完成提交 | `1cec73d` |
+| 实际用时 | 5 小时 |
+| 最终评分 | 100/100 |
 
-### 10.2 任务一：待填写官方任务名
+本 Lab 从 xv6 文件系统的两个互补方向展开。Large files 扩展单个 inode 能寻址的
+磁盘块数量，要求在磁盘 inode 大小不变的前提下加入二级间接索引；Symbolic
+links 则扩展命名语义，要求新增系统调用和 inode 类型，并在 `open()` 中安全地
+递归解析链接。两项任务都需要维护 inode、缓冲区、日志事务和引用计数的生命周期。
+
+### 10.2 Large files：二级间接块
 
 #### 10.2.1 实验目的
 
-待填写。
+原始 xv6 inode 使用 12 个直接块地址和 1 个一级间接块地址。块大小为 1024 字节，
+每个块可保存 256 个 32 位块号，因此单文件最多只能包含
+`12 + 256 = 268` 个数据块。任务要求复用 inode 中一个直接地址槽作为二级间接
+根，在不增大磁盘 inode 的条件下支持 65,803 个数据块。
 
-#### 10.2.2 前期准备、相关原理与调用链
+#### 10.2.2 inode 布局与寻址原理
 
-待填写 inode、块映射、日志与文件操作链。
+修改后的 13 个地址槽保持磁盘格式尺寸不变，但含义调整为：11 个直接块、1 个
+一级间接块和 1 个二级间接根块。
+
+```text
+ip->addrs[0..10]       → 11 个直接数据块
+ip->addrs[11]          → 一级间接块 → 256 个数据块
+ip->addrs[12]          → 二级根块 → 256 个一级索引块
+                                      → 每个再指向 256 个数据块
+```
+
+对应常量为：
+
+```c
+#define NDIRECT 11
+#define NINDIRECT (BSIZE / sizeof(uint))
+#define NDINDIRECT (NINDIRECT * NINDIRECT)
+#define MAXFILE (NDIRECT + NINDIRECT + NDINDIRECT)
+```
+
+所以 `MAXFILE = 11 + 256 + 256 * 256 = 65803`。`struct dinode` 与内存中的
+`struct inode` 均使用 `addrs[NDIRECT+2]`，总槽数仍为 13，避免改变 inode 在
+磁盘上的排列和每块 inode 数量。
 
 #### 10.2.3 设计与实现步骤
 
-待填写。
+`bmap(ip, bn)` 先处理直接区和一级间接区。进入二级区域后，逻辑块号减去前两段
+容量，再分解为两级下标：
+
+```text
+outer = bn / NINDIRECT
+inner = bn % NINDIRECT
+```
+
+若二级根块不存在，则通过 `balloc()` 分配；随后读取根块，用 `outer` 找到或创建
+对应的一级索引块；最后读取该索引块，用 `inner` 找到或创建数据块。每次把新块号
+写入索引缓冲区后调用 `log_write()`，使元数据更新进入当前文件系统事务；每个
+`bread()` 都在使用后执行 `brelse()`，避免泄漏缓冲区引用。
+
+扩展寻址必须同步扩展删除路径。`itrunc()` 按从叶到根的顺序遍历二级树：先释放
+每个一级索引块指向的数据块，再释放该一级索引块，最后释放二级根块。若先释放
+索引块，就会丢失叶子块号并造成永久磁盘空间泄漏。完成释放后清空 inode 地址和
+大小，再由 `iupdate()` 持久化。
 
 #### 10.2.4 实验结果
 
-待填写功能测试、大文件/路径边界和局部评分。
+专项命令 `./grade-lab-fs bigfile` 从新建文件开始连续写入 65,803 个块，再逐块
+读回校验。实际输出 `wrote 65803 blocks`、`bigfile done; ok`，评分通过：
+
+<div align="center">
+<img src="report-assets/fs-bigfile-grade-01.png" alt="Large files 写入并读回 65803 个块" width="760">
+<br>图 10-1 Large files 写入并读回 65,803 个块
+</div>
+
+完整 `usertests` 同样通过，其中大文件写入、读取和删除路径验证了扩展后的
+`bmap()` 与 `itrunc()` 能配合工作。
 
 #### 10.2.5 分析讨论
 
-待填写块索引、锁、引用和异常路径中的资源释放。
+二级间接结构用额外一次磁盘索引访问换取约 256 倍的容量增长，同时仍保持小文件
+走直接块的快速路径。实现的关键不是下标计算本身，而是磁盘格式不变式和异常路径：
+磁盘与内存 inode 必须使用相同数量的地址槽；索引项修改必须写入日志；分配失败
+必须返回 0；释放必须由叶到根。只有映射和截断互为逆操作，文件反复创建、扩展、
+删除后磁盘空闲块计数才不会持续下降。
 
-### 10.3 其他任务
+### 10.3 Symbolic links：符号链接
 
-待按 10.2 的统一结构补齐。
+#### 10.3.1 系统调用与磁盘表示
+
+新增 `symlink(target, path)` 系统调用后，用户态声明、`usys.pl` 汇编桩、系统调用
+编号和内核分派表形成完整调用链。文件类型增加 `T_SYMLINK`，打开标志增加
+`O_NOFOLLOW`。`Makefile` 同时把 `_symlinktest` 写入 fs 实验镜像。
+
+`sys_symlink()` 在日志事务中调用 `create(path, T_SYMLINK, 0, 0)` 创建 inode，
+再把 `target` 连同末尾 NUL 作为普通 inode 数据写入。创建过程不调用 `namei(target)`，
+因此目标可以暂时不存在，这符合符号链接区别于硬链接的语义。
+
+```text
+symlink(target, path)
+  → begin_op()
+  → create(path, T_SYMLINK)
+  → writei(ip, target, strlen(target) + 1)
+  → iunlockput(ip)
+  → end_op()
+```
+
+#### 10.3.2 `open()` 的链接跟随
+
+普通 `open()` 得到 inode 并加锁后，若类型为 `T_SYMLINK` 且没有指定
+`O_NOFOLLOW`，就读取 inode 中保存的目标路径，释放当前 inode 引用，再对目标执行
+`namei()` 和 `ilock()`。循环执行这一过程即可支持链接指向另一个链接。
+
+实现对每层内容进行边界检查：大小必须位于 `1..MAXPATH`，读取长度必须完整，最后
+一个字节必须为 NUL。解析深度限制为 10；目标不存在、内容损坏或链接环导致深度
+超限时统一返回 `-1`，并在错误路径释放 inode 锁和引用。设置 `O_NOFOLLOW` 时跳过
+该循环，调用者得到链接 inode 本身。`link()`、`unlink()` 等操作没有加入跟随
+逻辑，因此仍作用于目录项中的链接，而不是它的最终目标。
+
+#### 10.3.3 并发与专项验证
+
+链接创建和打开都位于 `begin_op()`/`end_op()` 事务范围内，inode 数据访问由 inode
+锁串行化，目录修改继续复用 `create()` 原有锁协议。因此并发进程创建、打开和
+删除不同链接时，不需要另建全局链接表或锁。
+
+`./grade-lab-fs symlinktest` 覆盖目标不存在、读写目标、`O_NOFOLLOW`、硬链接与
+unlink 语义、链接链、循环检测和并发链接，两项评分均通过：
+
+<div align="center">
+<img src="report-assets/fs-symlink-grade-01.png" alt="Symbolic links 专项和并发测试" width="700">
+<br>图 10-2 Symbolic links 功能与并发测试全部通过
+</div>
 
 ### 10.4 问题与解决、心得及验收
 
-待记录问题闭环、`make grade` 结果、截图和 commit。
+| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
+|---|---|---|---|
+| 增加二级地址后 inode 尺寸变化 | 直接增加地址槽会改变磁盘格式 | 将直接块从 12 减为 11，总槽数保持 13 | mkfs 和 usertests 通过 |
+| 二级索引分配后重启可能丢失指针 | 只改缓冲区而未加入日志事务 | 每次更新索引项后调用 `log_write()` | bigfile 完整读回通过 |
+| 删除大文件后磁盘块泄漏 | 只释放根或一级索引，叶子仍被占用 | `itrunc()` 按数据块、一级索引、二级根顺序释放 | usertests 通过 |
+| 链接环导致 `open()` 无限解析 | 链接目标可再次指向符号链接 | 最多跟随 10 层，超限返回 `-1` | symlink 循环测试通过 |
+| 链接切换时 inode 引用泄漏或重复持锁 | 解析下一目标前仍持有旧 inode | 每层先 `iunlockput()`，再 `namei()`、`ilock()` | 并发 symlink 测试通过 |
+| `O_NOFOLLOW` 被误当作访问模式 | 目录只读判断直接比较完整 `omode` | 判断目录访问模式时屏蔽 `O_NOFOLLOW` | `O_NOFOLLOW` 测试通过 |
+
+关键提交如下：
+
+| 提交 | 内容 |
+|---|---|
+| `707f919` | 实现二级间接块映射与完整截断释放 |
+| `1e9024e` | 实现符号链接系统调用、递归跟随和循环限制 |
+| `1cec73d` | 记录 5 小时实际用时并完成验收 |
+
+从干净状态运行 `make grade`，Large files、Symbolic links 两项、完整 usertests 和
+时间检查全部通过，最终得分为 100/100：
+
+<div align="center">
+<img src="report-assets/fs-grade-final-01.png" alt="File System Lab 完整评分 100/100" width="470">
+<br>图 10-3 File System Lab 完整评分结果 100/100
+</div>
+
+本 Lab 展示了文件系统中“地址”和“名称”两层间接性。二级块索引用树形结构把
+逻辑块号映射到磁盘块，符号链接则把路径名再次映射到另一个路径。两者都扩大了
+表达能力，也都引入了新的终止和回收问题：前者必须完整释放索引树，后者必须限制
+解析深度并正确交接 inode 引用。实现文件系统功能时，正常路径、日志持久性、锁、
+引用计数和失败回收必须作为同一套状态机一起设计。
 
 ## 11. Lab mmap：Memory mapping
 
@@ -1498,7 +1634,9 @@ Lab 则补齐了另一侧的入口和分派过程。完整链路为：用户 C �
 特权级，trampoline 保存寄存器，`usertrap()` 进入 `syscall()`；分派器根据
 `trapframe->a7` 查表调用 `sys_*` 实现，并把返回值写回 `a0`。新增
 `interpose()` 证明扩展系统调用必须同时修改声明、桩、编号、分派和内核实现，
-而 sandbox 还说明系统调用策略属于进程状态，必须随 fork 正确继承。
+而 sandbox 还说明系统调用策略属于进程状态，必须随 fork 正确继承。fs Lab 的
+`symlink()` 再次经过同一条接入链路，并进一步进入日志事务、目录创建和 inode
+写入，展示系统调用如何把用户路径参数转化为持久化文件系统状态。
 
 ### 12.2 进程、陷阱与虚拟内存的关系
 
@@ -1522,11 +1660,14 @@ tail 更新可见；UDP 端口队列则由中断接收路径生产、用户进�
 并行度足够：把物理页按 CPU 分区后，常见分配路径不再争用全局锁；跨分区转移
 则依靠固定双锁顺序同时保证可见性和无死锁。读写锁又把访问区分为读与写，通过
 活动读者、活动写者和等待写者三个状态，在扩大读并行度的同时保证写者优先。
-后续 fs Lab 完成后，再将这些策略与缓存和磁盘日志的锁设计进行比较。
+fs Lab 中 `bmap()` 和 `itrunc()` 则依靠 inode 锁保护单个文件的块映射，并通过
+`bread()`/`brelse()` 管理缓冲区引用、`log_write()` 把元数据变更纳入事务。
+它与前述内存并发路径的共同点是：锁只保护内存中的瞬时状态，资源所有权和持久化
+顺序还需要独立的不变式约束。
 
 ### 12.4 各 Lab 之间的联系
 
-前七个已完成 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
+前八个已完成 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
 syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继续下降到支撑进程
 隔离的地址转换和物理页生命周期。`attack` 能泄露秘密的根因正是物理页重用时
 没有清零，而 pgtbl Lab 的 `kalloc`、`uvmalloc`、`uvmcopy` 和 `uvmunmap`
@@ -1542,7 +1683,9 @@ net Lab 则把系统边界从用户/内核继续延伸到外部设备：中断�
 lock Lab 回到这些公共内核机制的并发基础，直接优化 COW、页表、网络缓冲区等
 路径共同依赖的物理页分配器，并通过读写锁展示“访问语义比互斥更细”时可获得的
 并行性。它把前面实验中作为工具使用的锁，变成了需要证明不变式、分析交错顺序
-和测量竞争开销的研究对象。
+和测量竞争开销的研究对象。fs Lab 最后把系统调用、锁和资源生命周期落实到
+持久化存储：二级间接块扩展 inode 的数据寻址能力，符号链接扩展路径名称空间；
+日志保证索引更新的事务性，按层释放与解析深度限制分别保证空间和控制流终止。
 
 ## 13. 总结与心得
 
@@ -1562,8 +1705,9 @@ lock Lab 回到这些公共内核机制的并发基础，直接优化 COW、页�
 8. MIT 6.1810 Lab: Copy-on-Write Fork: <https://pdos.csail.mit.edu/6.828/2025/labs/cow.html>
 9. MIT 6.1810 Lab: Network Driver: <https://pdos.csail.mit.edu/6.828/2025/labs/net.html>
 10. MIT 6.1810 Lab: Locks: <https://pdos.csail.mit.edu/6.828/2025/labs/lock.html>
-11. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
-12. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
+11. MIT 6.1810 Lab: File System: <https://pdos.csail.mit.edu/6.828/2025/labs/fs.html>
+12. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
+13. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
 
 <!-- 参考同学报告时只借鉴结构；若最终正文实际引用了其观点，必须在此显式标注。 -->
 
@@ -1583,7 +1727,7 @@ lock Lab 回到这些公共内核机制的并发基础，直接优化 COW、页�
 | cow | `cow` | `ecafd04`、`7fc6398` | 130/130 |
 | net | `net` | `3edc8d7`、`8096c80`、`d9ad0dc` | 171/171 |
 | lock | `lock` | `3bf1bcb`、`d68c3cc`、`17aa0bc` | 100/100 |
-| fs | `fs` | 待填写 | 待填写 |
+| fs | `fs` | `707f919`、`1e9024e`、`1cec73d` | 100/100 |
 | mmap | `mmap` | 待填写 | 待填写 |
 
 ## 附录
@@ -1599,8 +1743,9 @@ lock Lab 回到这些公共内核机制的并发基础，直接优化 COW、页�
 | cow | `make grade` | 130/130 | 图 7-1 |
 | net | `make grade` | 171/171 | 图 8-3 |
 | lock | `make grade` | 100/100 | 图 9-3 |
+| fs | `make grade` | 100/100 | 图 10-3 |
 
-fs 和 mmap Lab 完成后继续补充。
+mmap Lab 完成后继续补充。
 
 ### 附录 B：报告图片索引
 
@@ -1629,6 +1774,9 @@ fs 和 mmap Lab 完成后继续补充。
 | `report-assets/lock-kalloc-grade-01.png` | 9.2 | 每 CPU 内存分配器五项专项测试 |
 | `report-assets/lock-rwlock-grade-01.png` | 9.3 | 写者优先读写锁与四 CPU 结果 |
 | `report-assets/lock-grade-final-01.png` | 9.4 | lock 完整评分 100/100 |
+| `report-assets/fs-bigfile-grade-01.png` | 10.2 | Large files 写入并读回 65,803 个块 |
+| `report-assets/fs-symlink-grade-01.png` | 10.3 | Symbolic links 功能与并发专项评分 |
+| `report-assets/fs-grade-final-01.png` | 10.4 | fs 完整评分 100/100 |
 
 ### 附录 C：答辩演示命令
 
@@ -1693,9 +1841,20 @@ git switch lock
 tail -n 18 xv6.out
 ```
 
+File System Lab：
+
+```bash
+git switch fs
+./grade-lab-fs bigfile
+./grade-lab-fs symlinktest
+make grade
+```
+
 预期分别看到 sandbox 的拒绝/例外行为、`attack` 输出秘密，以及
 `pgtbltest: all tests succeeded`；traps 演示应看到三层内核调用链及 Alarm 的
 test0 至 test3 全部为 `OK`；COW 演示应看到四项 cowtest 和三项 usertests
 全部为 `OK`；Network 演示应看到九项网络测试全部为 `OK`，抓包中包含 UDP 和
 ARP 双向数据包；Lock 演示应看到分配器五项测试全部通过，以及读写锁四个 CPU
-均返回 0、最终 `4/4 CPUs succeeded`。退出 QEMU 时先按 `Ctrl+A`，再按 `X`。
+均返回 0、最终 `4/4 CPUs succeeded`；File System 演示应看到 bigfile 写入并
+读回 65,803 个块、两项 symlinktest 通过以及最终 `Score: 100/100`。退出 QEMU
+时先按 `Ctrl+A`，再按 `X`。
