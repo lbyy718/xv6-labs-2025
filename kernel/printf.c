@@ -149,3 +149,19 @@ printfinit(void)
 {
   initlock(&pr.lock, "pr");
 }
+
+// Print return addresses for the current kernel call stack.
+void
+backtrace(void)
+{
+  uint64 fp = r_fp();
+  uint64 stack_bottom = PGROUNDDOWN(fp);
+  uint64 stack_top = stack_bottom + PGSIZE;
+
+  printf("backtrace:\n");
+  while(fp >= stack_bottom + 16 && fp < stack_top){
+    uint64 ra = *(uint64 *)(fp - 8);
+    printf("%p\n", (void *)ra);
+    fp = *(uint64 *)(fp - 16);
+  }
+}
