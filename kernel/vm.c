@@ -7,6 +7,9 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "fs.h"
+#include "sleeplock.h"
+#include "file.h"
+#include "fcntl.h"
 
 /*
  * the kernel's page table.
@@ -352,7 +355,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0) {
-      if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
+      if((pa0 = vmfault(pagetable, va0, 15)) == 0) {
         return -1;
       }
     }
@@ -386,7 +389,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0) {
-      if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
+      if((pa0 = vmfault(pagetable, va0, 13)) == 0) {
         return -1;
       }
     }
@@ -415,8 +418,10 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   while(got_null == 0 && max > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if(pa0 == 0){
+      if((pa0 = vmfault(pagetable, va0, 13)) == 0)
+        return -1;
+    }
     n = PGSIZE - (srcva - va0);
     if(n > max)
       n = max;
@@ -445,27 +450,67 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   }
 }
 
-// allocate and map user memory if process is referencing a page
-// that was lazily allocated in sys_sbrk().
+// Allocate and map a file-backed VMA page or a page lazily allocated
+// by sys_sbrk(). scause identifies a load, store, or instruction fault.
 // returns 0 if va is invalid or already mapped, or if
 // out of physical memory, and physical address if successful.
 uint64
-vmfault(pagetable_t pagetable, uint64 va, int read)
+vmfault(pagetable_t pagetable, uint64 va, int scause)
 {
   uint64 mem;
   struct proc *p = myproc();
 
-  if (va >= p->sz)
+  for(int i = 0; i < NVMA; i++){
+    struct vma *v = &p->vmas[i];
+    if(v->length == 0 || va < v->addr || va >= v->addr + v->length)
+      continue;
+    if((scause == 13 && !(v->prot & PROT_READ)) ||
+       (scause == 15 && !(v->prot & PROT_WRITE)) ||
+       (scause == 12 && !(v->prot & PROT_EXEC)))
+      return 0;
+
+    va = PGROUNDDOWN(va);
+    if(ismapped(pagetable, va))
+      return 0;
+    mem = (uint64)kalloc();
+    if(mem == 0)
+      return 0;
+    memset((void *)mem, 0, PGSIZE);
+
+    uint64 fileoff = v->offset + (va - v->addr);
+    ilock(v->file->ip);
+    int n = readi(v->file->ip, 0, mem, fileoff, PGSIZE);
+    iunlock(v->file->ip);
+    if(n < 0){
+      kfree((void *)mem);
+      return 0;
+    }
+
+    int perm = PTE_U;
+    if(v->prot & (PROT_READ | PROT_WRITE))
+      perm |= PTE_R;
+    if(v->prot & PROT_WRITE)
+      perm |= PTE_W;
+    if(v->prot & PROT_EXEC)
+      perm |= PTE_X;
+    if(mappages(pagetable, va, PGSIZE, mem, perm) != 0){
+      kfree((void *)mem);
+      return 0;
+    }
+    return mem;
+  }
+
+  if(va >= p->sz)
     return 0;
   va = PGROUNDDOWN(va);
-  if(ismapped(pagetable, va)) {
+  if(ismapped(pagetable, va)){
     return 0;
   }
-  mem = (uint64) kalloc();
+  mem = (uint64)kalloc();
   if(mem == 0)
     return 0;
   memset((void *) mem, 0, PGSIZE);
-  if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0) {
+  if(mappages(pagetable, va, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0){
     kfree((void *)mem);
     return 0;
   }

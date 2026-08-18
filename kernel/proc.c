@@ -329,9 +329,11 @@ kexit(int status)
   if(p == initproc)
     panic("init exiting");
 
-  // Drop file references held by VMAs. Later stages also unmap pages here.
+  // Release any file-backed pages and file references held by VMAs.
   for(int i = 0; i < NVMA; i++){
     if(p->vmas[i].length != 0){
+      uvmunmap(p->pagetable, p->vmas[i].addr,
+              PGROUNDUP(p->vmas[i].length) / PGSIZE, 1);
       fileclose(p->vmas[i].file);
       memset(&p->vmas[i], 0, sizeof(p->vmas[i]));
     }
