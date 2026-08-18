@@ -24,9 +24,17 @@
 
 ## 摘要
 
-<!-- 最后撰写，约 300—500 字：背景、完成范围、核心方法、最终结果和主要收获。 -->
-
-待填写。
+本课程设计基于 MIT 6.1810 2025 版 xv6，完成 Unix utilities、System calls、
+Page tables、Traps、Copy-on-write、Network driver、Locking、File system 和
+Memory mapping 九个 Lab。项目从用户程序与系统调用接口出发，逐步深入页表、
+陷阱、物理页生命周期、设备中断、并发同步和持久化存储，并最终在 mmap Lab 中
+把系统调用、文件系统和缺页处理组合为完整的惰性文件映射机制。实现过程中采用
+“阅读官方说明—分析评分脚本—分阶段实现—专项测试—完整回归”的方法，以 Git
+分支和小步提交保存各阶段结果。关键工作包括系统调用策略控制、超级页映射、
+COW 引用计数、网卡描述符环、每 CPU 空闲页链表、写者优先读写锁、二级间接块、
+符号链接以及 VMA 的创建、装页、写回和回收。九个 Lab 的官方评分均全部通过，
+其中 mmap 最终得分为 170/170。实验表明，内核功能的正确性不仅取决于局部算法，
+还取决于权限、锁、引用计数、资源所有权及异常路径能否形成闭合生命周期。
 
 **关键词：** xv6；RISC-V；操作系统；系统调用；虚拟内存；文件系统
 
@@ -84,7 +92,7 @@ xv6 是一个面向教学的 Unix 风格操作系统。本项目以 MIT 6.1810 2
 | net | Network driver | 已完成 | 171/171 | 已完成 |
 | lock | Locking | 已完成 | 100/100 | 已完成 |
 | fs | File system | 已完成 | 100/100 | 已完成 |
-| mmap | Memory mapping | 未开始 | — | 未开始 |
+| mmap | Memory mapping | 已完成 | 170/170 | 已完成 |
 
 > 状态必须随实际进度更新，未完成的实验不得写成已完成。
 
@@ -1594,35 +1602,159 @@ unlink 语义、链接链、循环检测和并发链接，两项评分均通过�
 
 ### 11.1 实验概述
 
-| 官方分支 | 主题 | 具体任务 |
-|---|---|---|
-| `mmap` | 文件映射、虚拟内存区域和页错误 | 待按 2025 版填写 |
+| 项目 | 内容 |
+|---|---|
+| 官方分支 | `mmap` |
+| 实验主题 | 文件映射、VMA、惰性缺页装入和共享写回 |
+| 具体任务 | 实现 `mmap()`、`munmap()` 及 fork/exit 生命周期 |
+| 基线提交 | `5648f64` |
+| 完成提交 | `9079100` |
+| 实际用时 | 8 小时 |
+| 最终评分 | 170/170 |
 
-### 11.2 任务一：待填写官方任务名
+本 Lab 在 xv6 中实现 Unix 文件内存映射的核心子集。`mmap()` 不立即分配物理页，
+只建立虚拟内存区域（VMA）；进程首次访问时由页错误处理程序读取对应文件页；
+`munmap()` 对共享映射写回修改并解除映射；fork 和 exit 则维护 VMA、物理页和文件
+引用的完整生命周期。实现把系统调用、页表、陷阱和文件系统四条路径连接起来。
+
+### 11.2 系统调用与 VMA：只登记、不装页
 
 #### 11.2.1 实验目的
 
-待填写。
+接入 `mmap(addr, len, prot, flags, fd, offset)` 和 `munmap(addr, len)` 两个系统调用，
+并为每个进程保存最多 16 个 VMA。课程限定 `addr=0`、`offset=0`，权限为读、写、
+执行位的组合，映射类型为 `MAP_PRIVATE` 或 `MAP_SHARED`。`mmap()` 必须快速返回，
+不能在调用时读取整个文件或分配所有物理页。
 
-#### 11.2.2 前期准备、相关原理与调用链
+#### 11.2.2 VMA 数据与地址分配
 
-待填写映射区域、延迟分配、页错误和文件生命周期。
+`struct proc` 中加入固定 16 项的 VMA 数组，每项记录：
 
-#### 11.2.3 设计与实现步骤
+| 字段 | 作用 |
+|---|---|
+| `addr`、`length` | 映射虚拟地址和原始字节长度 |
+| `prot`、`flags` | PTE 权限来源和共享/私有语义 |
+| `file` | 被映射文件的独立引用 |
+| `offset` | VMA 起点对应的文件偏移 |
 
-待填写。
+映射从 `0xC0000000` 起向上选择页对齐区间。分配器扫描所有有效 VMA；若候选区间
+重叠，就把候选地址推进到冲突 VMA 末尾并重新扫描，直到找到空洞或接近
+`TRAPFRAME`。这种 first-fit 方法允许前缀/整段解除后复用空闲地址，而不依赖单调
+增长且可能溢出的全局指针。
 
-#### 11.2.4 实验结果
+`sys_mmap()` 验证长度、权限、flags、文件类型和可读性。共享可写映射还要求文件
+描述符可写；私有可写映射允许文件只读，因为修改只保留在私有物理页中。登记成功
+后调用 `filedup()`，所以用户随后 `close(fd)` 或 `unlink(path)` 都不会让 VMA 中的
+文件对象提前消失。
 
-待填写读写、解映射、进程退出和局部评分结果。
+#### 11.2.3 惰性设计的阶段验证
 
-#### 11.2.5 分析讨论
+第一阶段只登记 VMA，尚未实现装页。`mmaptest` 的第一次 `mmap()` 已返回成功，
+程序在首次访问映射地址后产生 load page fault，并准确停在 `stval=0xc0000000`。
+加入缺页装入后，测试能够完整校验两页文件内容，继续推进到尚未实现的第一次
+`munmap()`：
 
-待填写映射语义、权限、边界和资源回收。
+<div align="center">
+<img src="report-assets/mmap-pagefault-01.png" alt="mmap 惰性装页阶段推进到 munmap" width="720">
+<br>图 11-1 惰性装页完成后测试推进到 `munmap()` 阶段
+</div>
 
-### 11.3 问题与解决、心得及验收
+这一步验证 `mmap()` 本身没有预读文件：若在系统调用中装页，后续测试修改文件后
+再访问映射时就无法观察到新内容，`lazy access` 会失败。
 
-待记录问题闭环、`make grade` 结果、截图和 commit。
+### 11.3 页错误：按文件偏移装入物理页
+
+#### 11.3.1 缺页分派与权限
+
+`usertrap()` 将 instruction、load、store page fault（scause 12、13、15）交给
+`vmfault()`。处理程序先查找包含 fault VA 的 VMA，再根据访问类型检查
+`PROT_EXEC`、`PROT_READ` 或 `PROT_WRITE`；不符合权限的访问返回失败，由 trap
+路径终止进程。这样只读映射在第一次 store 时不会被错误地装成可写页。
+
+命中合法 VMA 后，地址向下对齐到页边界，分配并清零一页物理内存。文件读取偏移为：
+
+```text
+file_offset = vma.offset + (page_va - vma.addr)
+```
+
+处理程序持有 inode 睡眠锁调用 `readi()` 读取最多 4096 字节。页面预先清零，因此
+文件末尾不足一页的剩余空间自然为零。随后从 `prot` 构造 PTE：可写页同时设置
+`PTE_R|PTE_W`，避免 RISC-V 保留的 `W=1,R=0` 编码；可执行页设置 `PTE_X`；所有
+映射加入 `PTE_U`。
+
+内核复制路径也必须认识 VMA。`copyout()` 以 store 语义触发装页，`copyin()` 和
+`copyinstr()` 以 load 语义装页，避免系统调用把映射区作为缓冲区时绕过权限或直接
+失败。未命中 VMA 时，`vmfault()` 继续执行原有 lazy `sbrk` 零页逻辑。
+
+### 11.4 `munmap`：部分解除与共享写回
+
+#### 11.4.1 范围和 VMA 更新
+
+课程允许解除 VMA 前缀、后缀或整段，但不要求在中间打洞。`vmaunmap()` 要求地址
+页对齐、长度非零、取整后无溢出，并确认范围完全位于单个 VMA 且接触其中一个
+端点。`uvmunmap()` 可以跳过不存在的 PTE，所以从未访问的惰性页无需先分配即可
+直接解除。
+
+解除整段时关闭 VMA 文件引用并清空槽位；解除前缀时同步推进 `addr` 和 `offset`，
+再缩短 `length`；解除后缀时保留起点，仅缩短长度。地址、文件偏移和长度必须一起
+更新，否则后续页错误会从错误的文件位置读取。
+
+#### 11.4.2 `MAP_SHARED` 写回
+
+对 `MAP_SHARED|PROT_WRITE` 的已装入页，解除前通过 PTE 取得物理地址，以内核源
+地址调用 `writei()`。实现没有依赖 dirty 位，按课程允许的方式写回解除范围中的
+所有已映射可写页；`MAP_PRIVATE` 不写回。
+
+写回还处理了两个边界。第一，长度不超过 VMA 实际字节数和 inode 当前大小，避免
+把 1.5 页文件因第二页尾部零填充错误扩展为 2 页。第二，按 `BSIZE` 分块，每块使用
+独立的 `begin_op()`/`end_op()` 事务，避免一次写回 4 KiB 超过 xv6 的小型日志预算。
+
+### 11.5 fork、exit 与资源生命周期
+
+`kfork()` 复制父进程全部有效 VMA，并对每个文件执行 `filedup()`。课程允许父子
+进程不共享同一物理页，因此高地址 VMA 页不由 `uvmcopy()` 复制；子进程首次访问时
+根据相同 VMA 从文件重新装页。这样 `MAP_PRIVATE` 的父子修改天然隔离，减少了物理
+页引用计数和 COW 的额外复杂度。
+
+`kexit()` 对每个剩余 VMA 调用完整范围的 `vmaunmap()`，复用共享写回、页释放和
+文件关闭逻辑。若极端写回错误，退出路径仍强制解除映射并释放引用，保证后续
+`freewalk()` 不会遇到残留叶子 PTE。文件引用从 `mmap()` 的 `filedup()` 开始，
+最终只在整段 munmap 或 exit 时对应释放，形成闭合生命周期。
+
+### 11.6 问题闭环、测试与心得
+
+| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
+|---|---|---|---|
+| 装页后退出触发 `panic: freewalk: leaf` | VMA 位于 `p->sz` 之外，普通页表释放不会遍历该区 | exit 在 `freewalk()` 前逐个解除 VMA | 阶段测试正常退出 |
+| 可写但不可读 PTE 持续缺页 | RISC-V 将 `W=1,R=0` 视为保留编码 | 写权限同时加入 `PTE_R|PTE_W` | read/write 测试通过 |
+| 共享写回把短文件错误扩展 | 整页零填充内容也被写到 EOF 之后 | 按 inode 当前大小截断写回 | dirty 测试保持 1.5 页长度 |
+| 整页写回可能超过日志容量 | 4 KiB 涉及多个数据块和元数据 | 按 BSIZE 拆分独立事务 | shared writeback 通过 |
+| 部分解除后读错文件位置 | 只移动 VMA 地址，未同步文件偏移 | 前缀解除同时推进 `addr` 和 `offset` | partial unmap 通过 |
+| fork 子进程访问映射页错误 | 子进程没有 VMA 元数据和文件引用 | 复制 VMA 并 `filedup()`，物理页仍惰性装入 | fork test 通过 |
+| 写只读映射未被终止 | 缺页处理未区分 load/store | 按 scause 检查 VMA prot | read-only write 通过 |
+
+关键提交如下：
+
+| 提交 | 内容 |
+|---|---|
+| `a6efd1e` | 接入 mmap/munmap 系统调用并建立 VMA 表 |
+| `f65416c` | 实现文件映射页的惰性缺页装入和权限控制 |
+| `fe7f9a7` | 实现部分 munmap 与 MAP_SHARED 分块写回 |
+| `dd62bce` | 实现 fork VMA 继承和 exit 自动解除 |
+| `9079100` | 记录 8 小时实际用时并完成验收 |
+
+从干净状态运行 `make grade`，11 项 mmaptest、完整 usertests 和时间检查全部通过，
+最终得分 170/170：
+
+<div align="center">
+<img src="report-assets/mmap-grade-final-01.png" alt="mmap Lab 完整评分 170/170" width="390">
+<br>图 11-2 mmap Lab 完整评分结果 170/170
+</div>
+
+本 Lab 的核心认识是：内存映射不是单次系统调用，而是跨越整个进程生命周期的
+延迟协议。VMA 描述承诺，页错误兑现页面，`munmap` 和 exit 回收资源，fork 复制
+承诺但不必复制已兑现的物理页。任何一个环节遗漏权限、偏移、引用或写回，都会在
+很晚的执行阶段才表现为数据损坏或页表 panic，因此必须用统一的不变式分析全链路。
 
 ## 12. 综合分析
 
@@ -1647,7 +1779,11 @@ supervisor mode，trampoline 利用高地址处的 trapframe 映射保存上下�
 用户页、用户只读的内核共享数据以及仅 supervisor 可访问的 trapframe 与
 trampoline。COW 进一步利用只读 PTE 主动制造写缺页，在 `vmfault()` 中把共享
 物理页拆分为私有副本，说明页错误既可能代表非法访问，也可以成为延迟执行内存
-操作的正常控制流。后续 mmap Lab 完成后再补充文件映射和延迟映射部分。
+操作的正常控制流。mmap 进一步把这种机制推广到文件映射：VMA 先记录地址范围、
+文件和权限，首次访问再由同一缺页入口分配物理页并从文件读取。COW 延迟“复制”，
+mmap 延迟“读取”，两者都用 PTE 状态和 trap 把原本集中执行的内存操作分散到实际
+访问时完成；区别在于 COW 页的后端是已有物理页，mmap 页的后端是 inode 数据，
+并且共享映射还必须在解除映射或退出时完成文件写回。
 
 ### 12.3 并发、锁与资源生命周期
 
@@ -1667,7 +1803,7 @@ fs Lab 中 `bmap()` 和 `itrunc()` 则依靠 inode 锁保护单个文件的块�
 
 ### 12.4 各 Lab 之间的联系
 
-前八个已完成 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
+全部九个 Lab 构成一条逐层深入的路径：util 在用户态组合系统调用实现命令；
 syscall 进入内核观察调用分派、策略控制和隔离漏洞；pgtbl 继续下降到支撑进程
 隔离的地址转换和物理页生命周期。`attack` 能泄露秘密的根因正是物理页重用时
 没有清零，而 pgtbl Lab 的 `kalloc`、`uvmalloc`、`uvmcopy` 和 `uvmunmap`
@@ -1686,12 +1822,28 @@ lock Lab 回到这些公共内核机制的并发基础，直接优化 COW、页�
 和测量竞争开销的研究对象。fs Lab 最后把系统调用、锁和资源生命周期落实到
 持久化存储：二级间接块扩展 inode 的数据寻址能力，符号链接扩展路径名称空间；
 日志保证索引更新的事务性，按层释放与解析深度限制分别保证空间和控制流终止。
+mmap Lab 在此基础上把文件内容直接接入用户虚拟地址空间。VMA 将文件引用和地址
+范围绑定，页错误按需建立文件页，`munmap()` 与 exit 负责共享写回和最终回收，
+因此前面分别实现的系统调用、页表、trap、锁和 inode 操作在同一生命周期中汇合。
 
 ## 13. 总结与心得
 
-<!-- 只总结真实完成的内容、理解上的变化和后续改进方向。 -->
+本项目完成了 MIT 6.1810 2025 版九个 xv6 Labs，并通过各分支的完整评分。实验
+过程使我对操作系统的理解从“各模块提供什么功能”转向“状态如何跨模块流动”。
+一次用户请求可能依次经过系统调用桩、trapframe、内核分派、页表、锁和文件系统；
+任何一层遗漏权限检查、引用释放或失败回滚，问题都可能在很晚的位置才出现。
 
-待填写。
+实现中最重要的方法是先确定不变式，再编写正常路径。例如 COW 要保证每个共享页
+的引用计数与映射数一致；网卡收发要保证描述符和缓冲页只有一个释放责任方；
+文件系统要保证索引更新进入日志且截断能完整回收；mmap 则要保证 VMA、PTE、文件
+引用和写回范围始终对应。围绕这些不变式进行分阶段测试，比只根据最终输出修补
+代码更容易定位根因，也能降低后续功能引入回归的概率。
+
+九个 Lab 还展示了性能优化与正确性的关系。超级页、COW、每 CPU 空闲页链表和
+读写锁都通过减少复制、映射或锁竞争提升性能，但同时引入了降级、引用计数、偷取
+顺序和公平性等额外状态。后续可继续使用 QEMU 多核压力测试、故障注入和性能计数
+扩大验证范围，并把当前手工整理的阶段证据进一步自动化。总体而言，本项目建立了
+从用户态接口到硬件边界、从瞬时内存状态到持久化数据的完整 xv6 实践认识。
 
 ## 14. 参考资料
 
@@ -1706,8 +1858,9 @@ lock Lab 回到这些公共内核机制的并发基础，直接优化 COW、页�
 9. MIT 6.1810 Lab: Network Driver: <https://pdos.csail.mit.edu/6.828/2025/labs/net.html>
 10. MIT 6.1810 Lab: Locks: <https://pdos.csail.mit.edu/6.828/2025/labs/lock.html>
 11. MIT 6.1810 Lab: File System: <https://pdos.csail.mit.edu/6.828/2025/labs/fs.html>
-12. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
-13. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
+12. MIT 6.1810 Lab: Mmap: <https://pdos.csail.mit.edu/6.828/2025/labs/mmap.html>
+13. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
+14. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
 
 <!-- 参考同学报告时只借鉴结构；若最终正文实际引用了其观点，必须在此显式标注。 -->
 
@@ -1728,7 +1881,7 @@ lock Lab 回到这些公共内核机制的并发基础，直接优化 COW、页�
 | net | `net` | `3edc8d7`、`8096c80`、`d9ad0dc` | 171/171 |
 | lock | `lock` | `3bf1bcb`、`d68c3cc`、`17aa0bc` | 100/100 |
 | fs | `fs` | `707f919`、`1e9024e`、`1cec73d` | 100/100 |
-| mmap | `mmap` | 待填写 | 待填写 |
+| mmap | `mmap` | `a6efd1e`、`f65416c`、`fe7f9a7`、`dd62bce`、`9079100` | 170/170 |
 
 ## 附录
 
@@ -1744,8 +1897,7 @@ lock Lab 回到这些公共内核机制的并发基础，直接优化 COW、页�
 | net | `make grade` | 171/171 | 图 8-3 |
 | lock | `make grade` | 100/100 | 图 9-3 |
 | fs | `make grade` | 100/100 | 图 10-3 |
-
-mmap Lab 完成后继续补充。
+| mmap | `make grade` | 170/170 | 图 11-2 |
 
 ### 附录 B：报告图片索引
 
@@ -1777,6 +1929,8 @@ mmap Lab 完成后继续补充。
 | `report-assets/fs-bigfile-grade-01.png` | 10.2 | Large files 写入并读回 65,803 个块 |
 | `report-assets/fs-symlink-grade-01.png` | 10.3 | Symbolic links 功能与并发专项评分 |
 | `report-assets/fs-grade-final-01.png` | 10.4 | fs 完整评分 100/100 |
+| `report-assets/mmap-pagefault-01.png` | 11.2 | mmap 惰性装页阶段推进到 munmap |
+| `report-assets/mmap-grade-final-01.png` | 11.6 | mmap 完整评分 170/170 |
 
 ### 附录 C：答辩演示命令
 
@@ -1850,11 +2004,21 @@ git switch fs
 make grade
 ```
 
+Memory Mapping Lab：
+
+```bash
+git switch mmap
+./grade-lab-mmap mmaptest
+./grade-lab-mmap usertests
+make grade
+```
+
 预期分别看到 sandbox 的拒绝/例外行为、`attack` 输出秘密，以及
 `pgtbltest: all tests succeeded`；traps 演示应看到三层内核调用链及 Alarm 的
 test0 至 test3 全部为 `OK`；COW 演示应看到四项 cowtest 和三项 usertests
 全部为 `OK`；Network 演示应看到九项网络测试全部为 `OK`，抓包中包含 UDP 和
 ARP 双向数据包；Lock 演示应看到分配器五项测试全部通过，以及读写锁四个 CPU
 均返回 0、最终 `4/4 CPUs succeeded`；File System 演示应看到 bigfile 写入并
-读回 65,803 个块、两项 symlinktest 通过以及最终 `Score: 100/100`。退出 QEMU
-时先按 `Ctrl+A`，再按 `X`。
+读回 65,803 个块、两项 symlinktest 通过以及最终 `Score: 100/100`；Memory
+Mapping 演示应看到 11 项 mmaptest、完整 usertests 和时间检查全部为 `OK`，最终
+显示 `Score: 170/170`。退出 QEMU 时先按 `Ctrl+A`，再按 `X`。
