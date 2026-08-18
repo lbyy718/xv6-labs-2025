@@ -6,6 +6,7 @@
 
 #include "types.h"
 #include "riscv.h"
+#include "memlayout.h"
 #include "defs.h"
 #include "param.h"
 #include "stat.h"
@@ -117,6 +118,89 @@ sys_fstat(void)
   if(argfd(0, 0, &f) < 0)
     return -1;
   return filestat(f, st);
+}
+
+static uint64
+vmaaddr(struct proc *p, uint64 length)
+{
+  uint64 addr = MMAPBASE;
+
+  for(;;){
+    uint64 end = addr + length;
+    if(end < addr || end > TRAPFRAME)
+      return 0;
+
+    int overlap = 0;
+    for(int i = 0; i < NVMA; i++){
+      struct vma *v = &p->vmas[i];
+      if(v->length == 0)
+        continue;
+      uint64 vend = v->addr + PGROUNDUP(v->length);
+      if(addr < vend && end > v->addr){
+        addr = vend;
+        overlap = 1;
+        break;
+      }
+    }
+    if(!overlap)
+      return addr;
+  }
+}
+
+uint64
+sys_mmap(void)
+{
+  uint64 requested, length, offset;
+  int prot, flags;
+  struct file *f;
+  struct proc *p = myproc();
+  struct vma *v = 0;
+
+  argaddr(0, &requested);
+  argaddr(1, &length);
+  argint(2, &prot);
+  argint(3, &flags);
+  argaddr(5, &offset);
+  if(argfd(4, 0, &f) < 0 || requested != 0 || length == 0 ||
+     offset != 0 || f->type != FD_INODE || !f->readable)
+    return -1;
+  if((prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) != 0 ||
+     (prot & (PROT_READ | PROT_WRITE | PROT_EXEC)) == 0)
+    return -1;
+  if(flags != MAP_SHARED && flags != MAP_PRIVATE)
+    return -1;
+  if(flags == MAP_SHARED && (prot & PROT_WRITE) && !f->writable)
+    return -1;
+
+  for(int i = 0; i < NVMA; i++){
+    if(p->vmas[i].length == 0){
+      v = &p->vmas[i];
+      break;
+    }
+  }
+  if(v == 0)
+    return -1;
+
+  uint64 mapped_length = PGROUNDUP(length);
+  if(mapped_length < length)
+    return -1;
+  uint64 addr = vmaaddr(p, mapped_length);
+  if(addr == 0)
+    return -1;
+
+  v->addr = addr;
+  v->length = length;
+  v->prot = prot;
+  v->flags = flags;
+  v->file = filedup(f);
+  v->offset = offset;
+  return addr;
+}
+
+uint64
+sys_munmap(void)
+{
+  return -1;
 }
 
 // Create the path new as a link to the same inode as old.

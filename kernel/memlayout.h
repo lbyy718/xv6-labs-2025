@@ -57,3 +57,6 @@
 //   TRAPFRAME (p->trapframe, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
+
+// File-backed mappings start above the ordinary heap and grow upward.
+#define MMAPBASE 0xC0000000L

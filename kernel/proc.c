@@ -124,6 +124,7 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  memset(p->vmas, 0, sizeof(p->vmas));
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -327,6 +328,14 @@ kexit(int status)
 
   if(p == initproc)
     panic("init exiting");
+
+  // Drop file references held by VMAs. Later stages also unmap pages here.
+  for(int i = 0; i < NVMA; i++){
+    if(p->vmas[i].length != 0){
+      fileclose(p->vmas[i].file);
+      memset(&p->vmas[i], 0, sizeof(p->vmas[i]));
+    }
+  }
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
