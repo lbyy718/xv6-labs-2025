@@ -200,7 +200,11 @@ sys_mmap(void)
 uint64
 sys_munmap(void)
 {
-  return -1;
+  uint64 addr, length;
+
+  argaddr(0, &addr);
+  argaddr(1, &length);
+  return vmaunmap(myproc(), addr, length);
 }
 
 // Create the path new as a link to the same inode as old.

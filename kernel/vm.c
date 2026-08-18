@@ -517,6 +517,94 @@ vmfault(pagetable_t pagetable, uint64 va, int scause)
   return mem;
 }
 
+static int
+vmawritepage(struct vma *v, uint64 va, uint64 length)
+{
+  pte_t *pte = walk(myproc()->pagetable, va, 0);
+  if(pte == 0 || (*pte & PTE_V) == 0)
+    return 0;
+
+  uint64 pa = PTE2PA(*pte);
+  uint64 fileoff = v->offset + (va - v->addr);
+  uint64 done = 0;
+
+  while(done < length){
+    begin_op();
+    ilock(v->file->ip);
+    if(fileoff + done >= v->file->ip->size){
+      iunlock(v->file->ip);
+      end_op();
+      break;
+    }
+
+    uint64 n = length - done;
+    if(n > BSIZE)
+      n = BSIZE;
+    if(n > v->file->ip->size - (fileoff + done))
+      n = v->file->ip->size - (fileoff + done);
+    int written = writei(v->file->ip, 0, pa + done, fileoff + done, n);
+    iunlock(v->file->ip);
+    end_op();
+    if(written != n)
+      return -1;
+    done += n;
+  }
+  return 0;
+}
+
+int
+vmaunmap(struct proc *p, uint64 addr, uint64 length)
+{
+  if(addr % PGSIZE != 0 || length == 0)
+    return -1;
+  uint64 unmap_length = PGROUNDUP(length);
+  uint64 end = addr + unmap_length;
+  if(unmap_length < length || end < addr)
+    return -1;
+
+  struct vma *v = 0;
+  uint64 vend = 0;
+  for(int i = 0; i < NVMA; i++){
+    struct vma *candidate = &p->vmas[i];
+    if(candidate->length == 0)
+      continue;
+    uint64 candidate_end = candidate->addr + PGROUNDUP(candidate->length);
+    if(addr >= candidate->addr && end <= candidate_end){
+      v = candidate;
+      vend = candidate_end;
+      break;
+    }
+  }
+  if(v == 0 || (addr != v->addr && end != vend))
+    return -1;
+
+  if(v->flags == MAP_SHARED && (v->prot & PROT_WRITE)){
+    uint64 data_end = v->addr + v->length;
+    for(uint64 va = addr; va < end && va < data_end; va += PGSIZE){
+      uint64 n = data_end - va;
+      if(n > PGSIZE)
+        n = PGSIZE;
+      if(vmawritepage(v, va, n) < 0)
+        return -1;
+    }
+  }
+
+  uvmunmap(p->pagetable, addr, unmap_length / PGSIZE, 1);
+
+  uint64 data_end = v->addr + v->length;
+  if(addr == v->addr && end == vend){
+    fileclose(v->file);
+    memset(v, 0, sizeof(*v));
+  } else if(addr == v->addr){
+    v->addr = end;
+    v->offset += unmap_length;
+    v->length = data_end - end;
+  } else {
+    v->length = addr - v->addr;
+  }
+  return 0;
+}
+
 int
 ismapped(pagetable_t pagetable, uint64 va)
 {
