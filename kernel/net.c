@@ -19,6 +19,39 @@ static uint8 host_mac[ETHADDR_LEN] = { 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02 };
 
 static struct spinlock netlock;
 
+#define NBOUND_PORTS 64
+#define UDP_QUEUE_MAX 16
+
+struct udp_packet {
+  struct udp_packet *next;
+  char *buf;
+  uint32 src;
+  uint16 sport;
+  uint16 payload_offset;
+  uint16 payload_len;
+};
+
+struct port_queue {
+  int bound;
+  uint16 port;
+  int count;
+  struct udp_packet *head;
+  struct udp_packet *tail;
+};
+
+static struct port_queue port_queues[NBOUND_PORTS];
+
+// Caller must hold netlock.
+static struct port_queue *
+find_port(uint16 port)
+{
+  for(int i = 0; i < NBOUND_PORTS; i++){
+    if(port_queues[i].bound && port_queues[i].port == port)
+      return &port_queues[i];
+  }
+  return 0;
+}
+
 void
 netinit(void)
 {
@@ -34,9 +67,30 @@ netinit(void)
 uint64
 sys_bind(void)
 {
-  //
-  // Your code here.
-  //
+  int port;
+  argint(0, &port);
+  if(port < 0 || port > 0xffff)
+    return -1;
+
+  acquire(&netlock);
+  if(find_port(port) != 0){
+    release(&netlock);
+    return 0;
+  }
+
+  for(int i = 0; i < NBOUND_PORTS; i++){
+    struct port_queue *queue = &port_queues[i];
+    if(!queue->bound){
+      queue->bound = 1;
+      queue->port = port;
+      queue->count = 0;
+      queue->head = 0;
+      queue->tail = 0;
+      release(&netlock);
+      return 0;
+    }
+  }
+  release(&netlock);
 
   return -1;
 }
@@ -49,9 +103,31 @@ sys_bind(void)
 uint64
 sys_unbind(void)
 {
-  //
-  // Optional: Your code here.
-  //
+  int port;
+  argint(0, &port);
+  if(port < 0 || port > 0xffff)
+    return -1;
+
+  acquire(&netlock);
+  struct port_queue *queue = find_port(port);
+  if(queue == 0){
+    release(&netlock);
+    return -1;
+  }
+
+  struct udp_packet *packet = queue->head;
+  queue->bound = 0;
+  queue->count = 0;
+  queue->head = 0;
+  queue->tail = 0;
+  wakeup(queue);
+  release(&netlock);
+
+  while(packet != 0){
+    struct udp_packet *next = packet->next;
+    kfree(packet->buf);
+    packet = next;
+  }
 
   return 0;
 }
@@ -74,10 +150,58 @@ sys_unbind(void)
 uint64
 sys_recv(void)
 {
-  //
-  // Your code here.
-  //
-  return -1;
+  int dport, maxlen;
+  uint64 srcaddr, sportaddr, bufaddr;
+  struct proc *p = myproc();
+
+  argint(0, &dport);
+  argaddr(1, &srcaddr);
+  argaddr(2, &sportaddr);
+  argaddr(3, &bufaddr);
+  argint(4, &maxlen);
+  if(dport < 0 || dport > 0xffff || maxlen < 0)
+    return -1;
+
+  acquire(&netlock);
+  struct port_queue *queue = find_port(dport);
+  if(queue == 0){
+    release(&netlock);
+    return -1;
+  }
+
+  while(queue->head == 0){
+    if(killed(p)){
+      release(&netlock);
+      return -1;
+    }
+    sleep(queue, &netlock);
+    if(!queue->bound || queue->port != dport){
+      release(&netlock);
+      return -1;
+    }
+  }
+
+  struct udp_packet *packet = queue->head;
+  queue->head = packet->next;
+  queue->count--;
+  if(queue->head == 0)
+    queue->tail = 0;
+  release(&netlock);
+
+  int n = packet->payload_len;
+  if(n > maxlen)
+    n = maxlen;
+  int failed = copyout(p->pagetable, srcaddr, (char *)&packet->src,
+                       sizeof(packet->src)) < 0 ||
+               copyout(p->pagetable, sportaddr, (char *)&packet->sport,
+                       sizeof(packet->sport)) < 0 ||
+               copyout(p->pagetable, bufaddr,
+                       packet->buf + packet->payload_offset, n) < 0;
+
+  kfree(packet->buf);
+  if(failed)
+    return -1;
+  return n;
 }
 
 // This code is lifted from FreeBSD's ping.c, and is copyright by the Regents
@@ -134,9 +258,14 @@ sys_send(void)
   argaddr(3, &bufaddr);
   argint(4, &len);
 
-  int total = len + sizeof(struct eth) + sizeof(struct ip) + sizeof(struct udp);
-  if(total > PGSIZE)
+  if(sport < 0 || sport > 0xffff ||
+     dport < 0 || dport > 0xffff ||
+     len < 0 || len > PGSIZE - (int)(sizeof(struct eth) +
+                                      sizeof(struct ip) +
+                                      sizeof(struct udp)))
     return -1;
+
+  int total = len + sizeof(struct eth) + sizeof(struct ip) + sizeof(struct udp);
 
   char *buf = kalloc();
   if(buf == 0){
@@ -174,7 +303,10 @@ sys_send(void)
     return -1;
   }
 
-  e1000_transmit(buf, total);
+  if(e1000_transmit(buf, total) < 0){
+    kfree(buf);
+    return -1;
+  }
 
   return 0;
 }
@@ -188,10 +320,59 @@ ip_rx(char *buf, int len)
     printf("ip_rx: received an IP packet\n");
   seen_ip = 1;
 
-  //
-  // Your code here.
-  //
-  
+  int ethlen = sizeof(struct eth);
+  if(len < ethlen + (int)sizeof(struct ip))
+    goto drop;
+
+  struct ip *ip = (struct ip *)(buf + ethlen);
+  int ip_header_len = (ip->ip_vhl & 0x0f) * 4;
+  int ip_len = ntohs(ip->ip_len);
+  if((ip->ip_vhl >> 4) != 4 ||
+     ip_header_len < (int)sizeof(struct ip) ||
+     ip_len < ip_header_len + (int)sizeof(struct udp) ||
+     ethlen + ip_len > len ||
+     ip->ip_p != IPPROTO_UDP)
+    goto drop;
+
+  struct udp *udp = (struct udp *)((char *)ip + ip_header_len);
+  int udp_len = ntohs(udp->ulen);
+  if(udp_len < (int)sizeof(struct udp) ||
+     udp_len > ip_len - ip_header_len)
+    goto drop;
+
+  int payload_offset = (char *)(udp + 1) - buf;
+  int payload_len = udp_len - sizeof(struct udp);
+  if(payload_offset + payload_len > len ||
+     len > PGSIZE - (int)sizeof(struct udp_packet))
+    goto drop;
+
+  struct udp_packet *packet =
+    (struct udp_packet *)(buf + PGSIZE - sizeof(struct udp_packet));
+  packet->next = 0;
+  packet->buf = buf;
+  packet->src = ntohl(ip->ip_src);
+  packet->sport = ntohs(udp->sport);
+  packet->payload_offset = payload_offset;
+  packet->payload_len = payload_len;
+
+  acquire(&netlock);
+  struct port_queue *queue = find_port(ntohs(udp->dport));
+  if(queue == 0 || queue->count >= UDP_QUEUE_MAX){
+    release(&netlock);
+    goto drop;
+  }
+  if(queue->tail != 0)
+    queue->tail->next = packet;
+  else
+    queue->head = packet;
+  queue->tail = packet;
+  queue->count++;
+  wakeup(queue);
+  release(&netlock);
+  return;
+
+drop:
+  kfree(buf);
 }
 
 //
@@ -237,7 +418,8 @@ arp_rx(char *inbuf)
   memmove(arp->tha, ineth->shost, ETHADDR_LEN);
   arp->tip = inarp->sip;
 
-  e1000_transmit(buf, sizeof(*eth) + sizeof(*arp));
+  if(e1000_transmit(buf, sizeof(*eth) + sizeof(*arp)) < 0)
+    kfree(buf);
 
   kfree(inbuf);
 }
