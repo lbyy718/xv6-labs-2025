@@ -15,5 +15,3 @@ util-pause-01.png
 util-grade-01.png
 syscall-trace-01.png
 ```
-
-每个 Lab 建议仅保留 2—4 张能够证明功能、评分结果或关键调试过程的图片。

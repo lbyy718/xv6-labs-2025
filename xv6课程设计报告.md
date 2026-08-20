@@ -6,19 +6,17 @@
 
 <br>
 
-| 项目 | 内容 |
-|---|---|
-| 学院 | 计算机科学与技术 |
-| 专业班级 | 未提供，需补充 |
-| 姓名 | 李柏言 |
-| 学号 | 2452281 |
-| 指导教师 | 王老师 |
-| 完成日期 | 2026 年 8 月 |
-| GitHub 仓库 | <https://github.com/lbyy718/xv6-labs-2025> |
+| 项目        | 内容                                                                              |
+| ----------- | --------------------------------------------------------------------------------- |
+| 学院        | 计算机科学与技术                                                                  |
+| 专业        | 软件工程                                                                          |
+| 姓名        | 李柏言                                                                            |
+| 学号        | 2452281                                                                           |
+| 指导教师    | 王冬青                                                                            |
+| 完成日期    | 2026 年 8 月 20 日                                                                |
+| GitHub 仓库 | [https://github.com/lbyy718/xv6-labs-2025](https://github.com/lbyy718/xv6-labs-2025) |
 
 </div>
-
-> 本 Markdown 是最终上交文档的唯一源稿。导出为 Word 或 PDF 前，请补充仍标记为“未提供，需补充”的个人信息，并删除本提示。
 
 ---
 
@@ -32,9 +30,9 @@ Memory mapping 九个 Lab。项目从用户程序与系统调用接口出发，�
 “阅读官方说明—分析评分脚本—分阶段实现—专项测试—完整回归”的方法，以 Git
 分支和小步提交保存各阶段结果。关键工作包括系统调用策略控制、超级页映射、
 COW 引用计数、网卡描述符环、每 CPU 空闲页链表、写者优先读写锁、二级间接块、
-符号链接以及 VMA 的创建、装页、写回和回收。九个 Lab 的官方评分均全部通过，
-其中 mmap 最终得分为 170/170。实验表明，内核功能的正确性不仅取决于局部算法，
-还取决于权限、锁、引用计数、资源所有权及异常路径能否形成闭合生命周期。
+符号链接以及 VMA 的创建、装页、写回和回收。九个 Lab 的官方评分均全部通过。
+实验表明，内核功能的正确性不仅取决于局部算法，还取决于权限、锁、引用计数、
+资源所有权及异常路径能否形成闭合生命周期。
 
 **关键词：** xv6；RISC-V；操作系统；系统调用；虚拟内存；文件系统
 
@@ -45,19 +43,49 @@ COW 引用计数、网卡描述符环、每 CPU 空闲页链表、写者优先�
 - [1. 项目概述](#1-项目概述)
 - [2. 开发环境、工具与调试方法](#2-开发环境工具与调试方法)
 - [3. Lab util：Unix utilities](#3-lab-utilunix-utilities)
+  - [3.2 sleep：用户级延时程序](#32-sleep用户级延时程序)
+  - [3.3 sixfive：文本文件中的数字筛选](#33-sixfive文本文件中的数字筛选)
+  - [3.4 memdump：按格式解释连续内存](#34-memdump按格式解释连续内存)
+  - [3.5 find：递归查找目录树](#35-find递归查找目录树)
+  - [3.6 find -exec：对匹配文件执行命令](#36-find--exec对匹配文件执行命令)
 - [4. Lab syscall：System calls](#4-lab-syscallsystem-calls)
+  - [4.2 Using gdb：跟踪系统调用与内核页错误](#42-using-gdb跟踪系统调用与内核页错误)
+  - [4.3 Sandbox a command：按掩码限制系统调用](#43-sandbox-a-command按掩码限制系统调用)
+  - [4.4 Sandbox with allowed pathnames：精确路径例外](#44-sandbox-with-allowed-pathnames精确路径例外)
+  - [4.5 Attack xv6：利用未清零物理页](#45-attack-xv6利用未清零物理页)
 - [5. Lab pgtbl：Page tables](#5-lab-pgtblpage-tables)
+  - [5.2 Inspect a user-process page table：解释用户页表](#52-inspect-a-user-process-page-table解释用户页表)
+  - [5.3 Speed up system calls：共享只读 USYSCALL 页](#53-speed-up-system-calls共享只读-usyscall-页)
+  - [5.4 Print a page table：递归打印三级映射](#54-print-a-page-table递归打印三级映射)
+  - [5.5 Use superpages：2 MiB 大页映射](#55-use-superpages2-mib-大页映射)
 - [6. Lab traps：Traps](#6-lab-trapstraps)
+  - [6.2 RISC-V assembly：调用约定与反汇编分析](#62-risc-v-assembly调用约定与反汇编分析)
+  - [6.3 Backtrace：遍历内核栈帧](#63-backtrace遍历内核栈帧)
+  - [6.4 Alarm：由时钟中断进入用户处理函数](#64-alarm由时钟中断进入用户处理函数)
 - [7. Lab cow：Copy-on-write](#7-lab-cowcopy-on-write)
+  - [7.2 COW fork：共享父进程物理页](#72-cow-fork共享父进程物理页)
+  - [7.3 写缺页：按需创建私有副本](#73-写缺页按需创建私有副本)
+  - [7.4 copyout：处理内核发起的用户内存写入](#74-copyout处理内核发起的用户内存写入)
+  - [7.5 物理页引用计数与并发](#75-物理页引用计数与并发)
 - [8. Lab net：Network driver](#8-lab-netnetwork-driver)
+  - [8.2 Part One：E1000 NIC 驱动](#82-part-onee1000-nic-驱动)
+  - [8.3 Part Two：UDP Receive](#83-part-twoudp-receive)
 - [9. Lab lock：Locking](#9-lab-locklocking)
+  - [9.2 Memory allocator：每 CPU 空闲链表](#92-memory-allocator每-cpu-空闲链表)
+  - [9.3 Read-write lock：写者优先](#93-read-write-lock写者优先)
 - [10. Lab fs：File system](#10-lab-fsfile-system)
+  - [10.2 Large files：二级间接块](#102-large-files二级间接块)
+  - [10.3 Symbolic links：符号链接](#103-symbolic-links符号链接)
 - [11. Lab mmap：Memory mapping](#11-lab-mmapmemory-mapping)
+  - [11.2 系统调用与 VMA：只登记、不装页](#112-系统调用与-vma只登记不装页)
+  - [11.3 页错误：按文件偏移装入物理页](#113-页错误按文件偏移装入物理页)
+  - [11.4 munmap：部分解除与共享写回](#114-munmap部分解除与共享写回)
+  - [11.5 fork、exit 与资源生命周期](#115-forkexit-与资源生命周期)
 - [12. 综合分析](#12-综合分析)
 - [13. 总结与心得](#13-总结与心得)
 - [14. 参考资料](#14-参考资料)
 - [15. 源码仓库与提交记录](#15-源码仓库与提交记录)
-- [附录](#附录)
+- [附录：完整评分结果](#附录完整评分结果)
 
 ---
 
@@ -81,37 +109,72 @@ xv6 是一个面向教学的 Unix 风格操作系统。本项目以 MIT 6.1810 2
 
 ### 1.4 完成情况总览
 
-| Lab | 主题 | 实现状态 | `make grade` | 报告状态 |
-|---|---|---|---|---|
-| util | Unix utilities | 已完成 | 131/131 | 已完成 |
-| syscall | System calls | 已完成 | 45/45 | 已完成 |
-| pgtbl | Page tables | 已完成 | 41/41 | 已完成 |
-| traps | Traps | 已完成 | 95/95 | 已完成 |
-| cow | Copy-on-write | 已完成 | 130/130 | 已完成 |
-| net | Network driver | 已完成 | 171/171 | 已完成 |
-| lock | Locking | 已完成 | 100/100 | 已完成 |
-| fs | File system | 已完成 | 100/100 | 已完成 |
-| mmap | Memory mapping | 已完成 | 170/170 | 已完成 |
-
-> 状态必须随实际进度更新，未完成的实验不得写成已完成。
+| Lab     | 主题           | 实现状态 | `make grade` | 报告状态 |
+| ------- | -------------- | -------- | -------------- | -------- |
+| util    | Unix utilities | 已完成   | 131/131        | 已完成   |
+| syscall | System calls   | 已完成   | 45/45          | 已完成   |
+| pgtbl   | Page tables    | 已完成   | 41/41          | 已完成   |
+| traps   | Traps          | 已完成   | 95/95          | 已完成   |
+| cow     | Copy-on-write  | 已完成   | 130/130        | 已完成   |
+| net     | Network driver | 已完成   | 171/171        | 已完成   |
+| lock    | Locking        | 已完成   | 100/100        | 已完成   |
+| fs      | File system    | 已完成   | 100/100        | 已完成   |
+| mmap    | Memory mapping | 已完成   | 170/170        | 已完成   |
 
 ## 2. 开发环境、工具与调试方法
 
 ### 2.1 开发环境
 
-| 组件 | 实际版本 | 用途 |
-|---|---|---|
-| Windows + WSL 2 | WSL2 内核 6.18.33.2-microsoft-standard | 宿主和 Linux 开发环境 |
-| Ubuntu | 24.04 | 执行 Git、Make 和评分脚本 |
-| RISC-V GCC | 13.3.0 | 交叉编译 xv6 |
-| QEMU | 8.2.2 | 模拟 RISC-V 硬件 |
-| VS Code (WSL) | 1.134.0 | 源码阅读和编辑 |
+| 组件            | 实际版本                               | 用途                      |
+| --------------- | -------------------------------------- | ------------------------- |
+| Windows + WSL 2 | WSL2 内核 6.18.33.2-microsoft-standard | 宿主和 Linux 开发环境     |
+| Ubuntu          | 24.04                                  | 执行 Git、Make 和评分脚本 |
+| RISC-V GCC      | 13.3.0                                 | 交叉编译 xv6              |
+| QEMU            | 8.2.2                                  | 模拟 RISC-V 硬件          |
+| VS Code (WSL)   | 1.134.0                                | 源码阅读和编辑            |
 
 ### 2.2 环境安装与验证
 
-<!-- 只保留关键安装步骤、版本验证和一张启动截图，不粘贴整段安装日志。 -->
+本项目采用 Windows 宿主机与 WSL 2 中 Ubuntu 24.04 的组合环境。首次搭建时，
+先在具有管理员权限的 Windows PowerShell 中安装 Ubuntu，并确认发行版运行在
+WSL 2 模式：
+
+```powershell
+wsl --install -d Ubuntu-24.04
+wsl --set-default-version 2
+wsl --list --verbose
+```
+
+首次进入 Ubuntu 时创建 Linux 用户并设置密码。随后更新软件索引，安装 xv6
+编译、运行、调试和评分所需的工具：
 
 ```bash
+sudo apt update
+sudo apt install -y git build-essential python3 gdb-multiarch \
+  qemu-system-misc gcc-riscv64-linux-gnu binutils-riscv64-linux-gnu
+```
+
+源码通过 GitHub 托管仓库取得，并保留 MIT 官方仓库作为基线远程。这样既能在
+个人远程保存各 Lab 的实现，也能随时对照官方分支：
+
+```bash
+cd ~
+git clone https://github.com/lbyy718/xv6-labs-2025.git
+cd xv6-labs-2025
+git remote add mit git://g.csail.mit.edu/xv6-labs-2025
+git fetch mit
+git branch --all
+```
+
+如果仓库中已经存在名为 `mit` 的远程，则不需要重复执行 `git remote add`。
+本项目使用安装在 Windows 侧的 VS Code，通过 WSL 扩展打开 Linux 目录；在仓库
+根目录执行 `code .` 即可进入开发环境，终端、编译器和 Git 均运行在 Ubuntu 中。
+
+安装完成后依次检查系统、交叉编译器和模拟器版本，并编译启动 xv6：
+
+```bash
+uname -r
+lsb_release -ds
 qemu-system-riscv64 --version
 riscv64-linux-gnu-gcc --version
 cd ~/xv6-labs-2025
@@ -120,7 +183,8 @@ make qemu
 
 实际验证结果：`qemu-system-riscv64 --version` 返回 QEMU 8.2.2，
 `riscv64-linux-gnu-gcc --version` 返回 GCC 13.3.0；在仓库根目录执行 `make qemu`
-可以启动 xv6。各 Lab 的完整评分结果见第 1.4 节和附录 A。
+可以启动 xv6 并进入用户 shell。完成测试后依次按 `Ctrl+A` 和 `X` 退出 QEMU。
+各 Lab 的完整评分结果见第 1.4 节和附录。
 
 ### 2.3 仓库与分支管理
 
@@ -135,25 +199,25 @@ make qemu
 
 ### 2.5 环境问题与解决方法
 
-| 现象 | 定位方法 | 根本原因 | 解决方法 | 验证结果 |
-|---|---|---|---|---|
-| `rg` 命令不可用 | 执行 Backtrace 地址提取命令时报错 | Ubuntu 环境未安装 ripgrep | 改用 `grep -oE` 和 `while read` 管道完成地址解析 | addr2line 解析正常 |
-| 将 xv6 内命令直接交给 Bash | 把 `test basic mmap` 当作宿主命令执行 | xv6 测试命令必须通过评分脚本或 QEMU shell 运行 | 使用 `./grade-lab-mmap mmaptest` 或在 QEMU 中运行 `mmaptest` | mmap 测试通过 |
-| 多分支合并出现冲突 | 报告和实验分支包含不同文件历史 | 分支职责不同，直接合并会产生同名文件冲突 | 实验实现保留在各 Lab 分支，报告集中提交到 `report` | 分支和远程状态一致 |
+| 现象                       | 定位方法                                | 根本原因                                       | 解决方法                                                         | 验证结果           |
+| -------------------------- | --------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- | ------------------ |
+| `rg` 命令不可用          | 执行 Backtrace 地址提取命令时报错       | Ubuntu 环境未安装 ripgrep                      | 改用 `grep -oE` 和 `while read` 管道完成地址解析             | addr2line 解析正常 |
+| 将 xv6 内命令直接交给 Bash | 把 `test basic mmap` 当作宿主命令执行 | xv6 测试命令必须通过评分脚本或 QEMU shell 运行 | 使用 `./grade-lab-mmap mmaptest` 或在 QEMU 中运行 `mmaptest` | mmap 测试通过      |
+| 多分支合并出现冲突         | 报告和实验分支包含不同文件历史          | 分支职责不同，直接合并会产生同名文件冲突       | 实验实现保留在各 Lab 分支，报告集中提交到 `report`             | 分支和远程状态一致 |
 
 ## 3. Lab util：Unix utilities
 
-### 3.1 实验概述
+### 3.1 实验目的与要求
 
-| 项目 | 内容 |
-|---|---|
-| 官方分支 | `util` |
-| 实验主题 | xv6 用户程序、文件 I/O、C 内存表示、目录遍历和进程控制 |
+| 项目     | 内容                                                          |
+| -------- | ------------------------------------------------------------- |
+| 官方分支 | `util`                                                      |
+| 实验主题 | xv6 用户程序、文件 I/O、C 内存表示、目录遍历和进程控制        |
 | 具体任务 | `sleep`、`sixfive`、`memdump`、`find`、`find -exec` |
-| 基线提交 | `db9a9d8` |
-| 完成提交 | `5493306` |
-| 实际用时 | 6 小时 |
-| 最终评分 | 131/131 |
+| 基线提交 | `db9a9d8`                                                   |
+| 完成提交 | `5493306`                                                   |
+| 实际用时 | 6 小时                                                        |
+| 最终评分 | 131/131                                                       |
 
 本 Lab 的任务集合与旧版 xv6 Lab 不同。开发前先对照 2025 官方页面、本地 `grade-lab-util` 和当前分支文件，确定了真实任务及评分边界，再按一个功能一个 Git 检查点的方式实现。
 
@@ -178,10 +242,10 @@ shell 解析 sleep 10
 
 #### 3.2.3 设计与实现
 
-| 文件 | 修改 | 作用 |
-|---|---|---|
-| `user/sleep.c` | 新建用户程序 | 验证参数、转换 ticks、调用 `pause()` |
-| `Makefile` | 在 `UPROGS` 中加入 `_sleep` | 将程序编译并写入 xv6 文件系统镜像 |
+| 文件             | 修改                            | 作用                                   |
+| ---------------- | ------------------------------- | -------------------------------------- |
+| `user/sleep.c` | 新建用户程序                    | 验证参数、转换 ticks、调用 `pause()` |
+| `Makefile`     | 在 `UPROGS` 中加入 `_sleep` | 将程序编译并写入 xv6 文件系统镜像      |
 
 ```c
 if(argc != 2){
@@ -196,10 +260,10 @@ exit(0);
 
 #### 3.2.4 实验结果与分析
 
-| 测试 | 结果 |
-|---|---|
-| 无参数运行 | 输出 `usage: sleep ticks` 并正常返回 shell |
-| `sleep 10` | 暂停约 10 ticks 后返回 shell |
+| 测试                       | 结果                                            |
+| -------------------------- | ----------------------------------------------- |
+| 无参数运行                 | 输出 `usage: sleep ticks` 并正常返回 shell    |
+| `sleep 10`               | 暂停约 10 ticks 后返回 shell                    |
 | `./grade-lab-util sleep` | 3/3 测试通过，包括断点验证 `sys_pause` 被调用 |
 
 评分脚本不仅检查程序是否返回，还在 `sys_pause` 设置断点，因此全部通过说明程序确实进入了要求的系统调用，而不是用空循环模拟延时。
@@ -222,10 +286,10 @@ exit(0);
 
 #### 3.3.3 实现与结果
 
-| 文件 | 修改 | 作用 |
-|---|---|---|
-| `user/sixfive.c` | 新建逐字符解析程序 | 处理 token、整除判断、多文件和错误路径 |
-| `Makefile` | 在 `UPROGS` 中加入 `_sixfive` | 将程序加入镜像 |
+| 文件               | 修改                              | 作用                                   |
+| ------------------ | --------------------------------- | -------------------------------------- |
+| `user/sixfive.c` | 新建逐字符解析程序                | 处理 token、整除判断、多文件和错误路径 |
+| `Makefile`       | 在 `UPROGS` 中加入 `_sixfive` | 将程序加入镜像                         |
 
 ```text
 $ sixfive sixfive.txt README
@@ -241,7 +305,7 @@ $ sixfive sixfive.txt README
 ```
 
 <div align="center">
-<img src="report-assets/util-sixfive-01.png" alt="sixfive 多文件测试结果" width="355">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/util-sixfive-01.png" alt="sixfive 多文件测试结果" width="355">
 <br>图 3-1 sixfive 对 sixfive.txt 和 README 的多文件处理结果
 </div>
 
@@ -255,13 +319,13 @@ $ sixfive sixfive.txt README
 
 #### 3.4.2 格式字符与指针推进
 
-| 格式 | 解释方式 | `data` 推进 |
-|---|---|---:|
-| `i` | 32 位有符号整数，十进制 | 4 字节 |
-| `p` | 64 位数值，十六进制 | 8 字节 |
-| `h` | 16 位有符号整数，十进制 | 2 字节 |
-| `c` | 8 位 ASCII 字符 | 1 字节 |
-| `s` | 当前 8 字节保存的字符串指针 | 8 字节 |
+| 格式  | 解释方式                      |  `data` 推进 |
+| ----- | ----------------------------- | -------------: |
+| `i` | 32 位有符号整数，十进制       |         4 字节 |
+| `p` | 64 位数值，十六进制           |         8 字节 |
+| `h` | 16 位有符号整数，十进制       |         2 字节 |
+| `c` | 8 位 ASCII 字符               |         1 字节 |
+| `s` | 当前 8 字节保存的字符串指针   |         8 字节 |
 | `S` | 当前位置的 NUL 结尾内联字符串 | 字符串长度 + 1 |
 
 多字节字段没有直接将 `char *` 强制转换后解引用，而是先使用 `memmove` 复制到正确类型的局部变量。这样既使字节宽度明确，也避免了未对齐地址的直接访问。
@@ -269,7 +333,7 @@ $ sixfive sixfive.txt README
 #### 3.4.3 实验结果与分析
 
 <div align="center">
-<img src="report-assets/util-memdump-01.png" alt="memdump 内置示例结果" width="318">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/util-memdump-01.png" alt="memdump 内置示例结果" width="318">
 <br>图 3-2 memdump 对整数、指针、字符和字符串的解析结果
 </div>
 
@@ -292,13 +356,13 @@ open(path)
 
 #### 3.5.2 设计与实现
 
-| 关键点 | 处理方式 |
-|---|---|
-| 目录项名称 | 复制固定长度 `DIRSIZ` 后显式补 `\0` |
-| 递归循环 | 跳过 inode 为 0 的目录项及 `.`、`..` |
-| 路径匹配 | 提取最后一段后使用 `strcmp()`，不使用指针 `==` |
-| 路径安全 | 在 512 字节缓冲区中追加目录项前检查长度 |
-| 资源管理 | 打开或 `fstat` 失败时报错，所有返回路径正确 `close(fd)` |
+| 关键点     | 处理方式                                                    |
+| ---------- | ----------------------------------------------------------- |
+| 目录项名称 | 复制固定长度 `DIRSIZ` 后显式补 `\0`                     |
+| 递归循环   | 跳过 inode 为 0 的目录项及 `.`、`..`                    |
+| 路径匹配   | 提取最后一段后使用 `strcmp()`，不使用指针 `==`          |
+| 路径安全   | 在 512 字节缓冲区中追加目录项前检查长度                     |
+| 资源管理   | 打开或 `fstat` 失败时报错，所有返回路径正确 `close(fd)` |
 
 `./grade-lab-util 'find, in' 'find, recursive'` 验证了当前目录、指定子目录和多层递归三种情况，全部通过。
 
@@ -330,21 +394,36 @@ find path name -exec command [args ...]
 #### 3.6.3 回归测试与分析
 
 <div align="center">
-<img src="report-assets/util-find-exec-grade-01.png" alt="find 与 find -exec 回归评分" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/util-find-exec-grade-01.png" alt="find 与 find -exec 回归评分" width="760">
 <br>图 3-3 find 与 find -exec 的六项回归测试
 </div>
 
 图 3-3 同时运行了三项基础 `find` 和三项 `exec` 测试，全部为 `OK`。这说明执行扩展没有改变原有查找语义，同时支持单参数、多参数和递归目录中的命令执行。
 
-### 3.7 关键问题与处理
+### 3.7 实验中遇到的问题和解决方法
 
-| 所属任务 | 问题/风险 | 原因 | 处理与验证 |
-|---|---|---|---|
-| sleep | 旧资料使用 `sleep()`，当前任务要求 `pause()` | 2025 版重命名了用户和内核入口 | 以官方页面和本地 `sys_pause` 为准；断点评分通过 |
-| sixfive | `xv6` 中的 `6` 不应当作数字 | 非分隔符字母会使整个 token 无效 | 增加 `valid` 状态；README 边界测试通过 |
-| memdump | 将 `char *` 直接转成多字节指针可能未对齐 | 输入指针按 1 字节推进 | 使用 `memmove` 读入对齐局部变量；全部格式测试通过 |
-| find | `dirent.name` 不保证是普通 C 字符串 | 目录项使用固定长度 `DIRSIZ` | 复制后显式补 `\0`，再比较 `.`、`..` 和目标名 |
-| find -exec | 执行参数还需追加文件路径 | 空指针结尾和 `MAXARG` 都占用边界 | 执行前检查数量并显式结尾；多参数评分通过 |
+本 Lab 的问题主要来自版本差异、字节级数据处理和 xv6 的资源上限。处理时先用
+官方 2025 页面与本地评分脚本确认要求，再用最小输入复现。
+
+开始实现 `sleep` 时，旧版资料普遍调用 `sleep()`，而当前 2025 版要求使用
+`pause()`，内核入口也改为 `sys_pause`。如果照搬旧版代码，程序虽然结构相似，
+却不符合本次评分点。最后以当前分支源码和评分脚本为准改用 `pause()`，断点测试
+确认程序确实进入了 `sys_pause`。
+
+实现 `sixfive` 时，最初只要遇到数字就开始累积，会把 `xv6` 中的字符 `6` 错当成
+独立数字。原因是字母虽然不是数字，却也不是官方规定的分隔符。后续增加 `valid`
+状态，一旦 token 中出现非法字符，就丢弃整个 token，直到下一个合法分隔符才
+重新开始。README 边界测试随后通过。
+
+`memdump` 需要按 1 字节推进输入指针，但待读取的整数、短整数和指针可能位于未对齐
+地址。直接把 `char *` 强制转换后解引用存在未对齐访问风险，因此改用 `memmove`
+将固定宽度字节复制到对齐的局部变量，再按对应类型输出，所有格式测试均通过。
+
+递归实现 `find` 时，`dirent.name` 是固定长度字段，不保证以 `\0` 结尾，直接交给
+字符串函数会越界读取。解决方法是先复制 `DIRSIZ` 个字节并显式补结束符，再判断
+`.`、`..` 和目标名称。扩展 `find -exec` 时还要为匹配路径及末尾空指针预留参数
+位置，因此在构造参数前检查 `MAXARG`，避免数组越界。基础 find 和 exec 回归测试
+均通过。
 
 ### 3.8 最终验收
 
@@ -355,18 +434,18 @@ make clean
 make grade
 ```
 
-| 验收项 | 结果 |
-|---|---|
-| sleep | 3 项通过 |
-| sixfive | 3 项通过 |
-| memdump | 2 项通过 |
-| find | 3 项通过 |
-| find -exec | 3 项通过 |
-| time | 通过 |
-| 最终总分 | **131/131** |
+| 验收项     | 结果              |
+| ---------- | ----------------- |
+| sleep      | 3 项通过          |
+| sixfive    | 3 项通过          |
+| memdump    | 2 项通过          |
+| find       | 3 项通过          |
+| find -exec | 3 项通过          |
+| time       | 通过              |
+| 最终总分   | **131/131** |
 
 <div align="center">
-<img src="report-assets/util-grade-final-01.png" alt="util Lab 完整评分 131/131" width="360">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/util-grade-final-01.png" alt="util Lab 完整评分 131/131" width="360">
 <br>图 3-4 util Lab 完整评分结果
 </div>
 
@@ -378,17 +457,17 @@ make grade
 
 ## 4. Lab syscall：System calls
 
-### 4.1 实验概述
+### 4.1 实验目的与要求
 
-| 项目 | 内容 |
-|---|---|
-| 官方分支 | `syscall` |
-| 实验主题 | 系统调用入口、进程级调用限制与内存隔离安全 |
+| 项目     | 内容                                                   |
+| -------- | ------------------------------------------------------ |
+| 官方分支 | `syscall`                                            |
+| 实验主题 | 系统调用入口、进程级调用限制与内存隔离安全             |
 | 具体任务 | GDB 调试、系统调用掩码 sandbox、路径例外、内存残留攻击 |
-| 基线提交 | `0e53502` |
-| 完成提交 | `f031d96` |
-| 实际用时 | 5 小时 |
-| 最终评分 | 45/45 |
+| 基线提交 | `0e53502`                                            |
+| 完成提交 | `f031d96`                                            |
+| 实际用时 | 5 小时                                                 |
+| 最终评分 | 45/45                                                  |
 
 本 Lab 从用户态 `ecall` 的入口开始，先借助 GDB 观察陷阱现场，再新增
 `interpose()` 系统调用，将调用限制保存为进程状态并继承给子进程。随后将
@@ -427,7 +506,7 @@ console 的操作。`sstatus = 0x200000022` 的 SPP 位为 0，说明陷阱发�
 系统调用数组本身发生越界。
 
 <div align="center">
-<img src="report-assets/syscall-gdb-01.png" alt="GDB 跟踪系统调用与页错误" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/syscall-gdb-01.png" alt="GDB 跟踪系统调用与页错误" width="760">
 <br>图 4-1 GDB 中的系统调用调用栈、特权级与空地址页错误定位
 </div>
 
@@ -447,15 +526,15 @@ int interpose(int mask, const char *allowed_path);
 `mask` 的第 `n` 位控制编号为 `n` 的系统调用。若该位为 1，调用默认被拒绝并
 向用户态返回 `-1`。为了打通完整调用链，分别修改了以下位置：
 
-| 文件 | 修改内容 | 作用 |
-|---|---|---|
-| `user/user.h` | 声明 `interpose()` | 允许用户程序编译调用 |
-| `user/usys.pl` | 生成用户态调用桩 | 写入调用号并执行 `ecall` |
-| `kernel/syscall.h` | 定义 `SYS_interpose = 22` | 分配唯一系统调用号 |
-| `kernel/syscall.c` | 注册处理函数并检查掩码 | 在真正分派前拒绝调用 |
-| `kernel/sysproc.c` | 实现 `sys_interpose()` | 读取参数并写入进程状态 |
-| `kernel/proc.h` | 增加掩码和允许路径 | 保存每个进程的策略 |
-| `Makefile` | 加入 `_sandbox` | 将测试程序写入文件系统镜像 |
+| 文件                 | 修改内容                    | 作用                       |
+| -------------------- | --------------------------- | -------------------------- |
+| `user/user.h`      | 声明 `interpose()`        | 允许用户程序编译调用       |
+| `user/usys.pl`     | 生成用户态调用桩            | 写入调用号并执行 `ecall` |
+| `kernel/syscall.h` | 定义 `SYS_interpose = 22` | 分配唯一系统调用号         |
+| `kernel/syscall.c` | 注册处理函数并检查掩码      | 在真正分派前拒绝调用       |
+| `kernel/sysproc.c` | 实现 `sys_interpose()`    | 读取参数并写入进程状态     |
+| `kernel/proc.h`    | 增加掩码和允许路径          | 保存每个进程的策略         |
+| `Makefile`         | 加入 `_sandbox`           | 将测试程序写入文件系统镜像 |
 
 新进程在 `allocproc()` 中将策略初始化为空，避免复用 `struct proc` 时残留旧
 限制。`kfork()` 将父进程的 `syscall_mask` 和 `allowed_path` 复制给子进程，
@@ -492,7 +571,7 @@ if(p->syscall_mask & (1U << num)) {
 ```
 
 <div align="center">
-<img src="report-assets/syscall-sandbox-01.png" alt="sandbox 掩码和路径测试" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/syscall-sandbox-01.png" alt="sandbox 掩码和路径测试" width="760">
 <br>图 4-2 sandbox 对 open 的拒绝、README 路径例外和非匹配路径拒绝
 </div>
 
@@ -525,7 +604,7 @@ secret 退出并释放页面
 ```
 
 <div align="center">
-<img src="report-assets/syscall-attack-01.png" alt="attack 泄露 secret 数据" width="620">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/syscall-attack-01.png" alt="attack 泄露 secret 数据" width="620">
 <br>图 4-3 attack 从重新分配的物理页中恢复 ReportSecret7
 </div>
 
@@ -533,28 +612,41 @@ secret 退出并释放页面
 物理页交给不同安全域前清除旧内容；仅依赖用户进程不会主动扫描内存是不成立
 的安全假设。
 
-### 4.6 问题闭环与最终验收
+### 4.6 实验中遇到的问题和解决方法
 
-| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
-|---|---|---|---|
-| 只实现内核函数仍无法调用 | 系统调用需用户桩、调用号、分派表和实现共同组成 | 逐层补齐调用链 | 编译通过，`sandbox_mask` 通过 |
-| 子进程可能绕过限制 | fork 默认只复制地址空间和通用进程状态 | 在 `kfork()` 显式复制策略 | `sandbox_fork: OK` |
-| 路径例外误放行其他调用 | 仅凭掩码无法表达参数条件 | 只对 open/exec 提取并精确比较第 0 参数 | path、most、minus 均通过 |
-| 攻击偶尔拿不到目标页 | freelist 顺序和先前分配会影响重用位置 | 一次申请 32 页并全范围搜索标记 | 随机秘密测试通过 |
+本 Lab 的困难集中在系统调用跨层接入、进程策略继承和物理页残留数据的稳定复现。
+
+最初只增加内核处理函数时，用户程序仍然无法调用新系统调用。原因是 xv6 的系统
+调用由用户声明、汇编桩、调用号、分派表和内核实现共同组成，缺少任意一层都会在
+编译或运行时失败。逐层补齐这条调用链后，程序编译成功，`sandbox_mask` 通过。
+
+第一版 sandbox 只修改当前进程的限制状态，子进程通过 fork 后可能恢复为无限制
+状态。检查进程创建路径后发现，新增字段不会由地址空间复制自动继承，因此在
+`kfork()` 中显式复制系统调用掩码和允许路径，`sandbox_fork` 随后通过。
+
+加入路径例外时，若只判断掩码和字符串，可能把例外错误应用到其他系统调用，或
+放行前缀相同但实际不同的路径。后续只对 open 和 exec 提取第 0 个参数，并使用
+完整字符串精确比较，path、most 和 minus 三类边界测试全部通过。
+
+实现内存残留攻击时，攻击程序偶尔无法拿到保存秘密的那一页。物理页重新分配顺序
+会受到 freelist 和先前内核分配影响，不能假定第一次 `sbrk()` 就返回目标页。
+因此一次申请 32 页并逐页搜索已知标记，使随机秘密测试稳定通过。
+
+### 4.7 最终验收与心得
 
 关键提交如下：
 
-| 提交 | 内容 |
-|---|---|
-| `1c298e3` | 完成 GDB 问题与 `answers-syscall.txt` |
-| `ee2117e` | 实现系统调用掩码 sandbox |
-| `6cfe037` | 增加允许路径语义 |
-| `346d204`、`f031d96` | 完成攻击程序、耗时和最终收尾 |
+| 提交                     | 内容                                    |
+| ------------------------ | --------------------------------------- |
+| `1c298e3`              | 完成 GDB 问题与 `answers-syscall.txt` |
+| `ee2117e`              | 实现系统调用掩码 sandbox                |
+| `6cfe037`              | 增加允许路径语义                        |
+| `346d204`、`f031d96` | 完成攻击程序、耗时和最终收尾            |
 
 从干净状态运行 `make grade`，所有项目通过：
 
 <div align="center">
-<img src="report-assets/syscall-grade-01.png" alt="syscall Lab 完整评分 45/45" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/syscall-grade-01.png" alt="syscall Lab 完整评分 45/45" width="760">
 <br>图 4-4 syscall Lab 完整评分结果 45/45
 </div>
 
@@ -565,17 +657,17 @@ secret 退出并释放页面
 
 ## 5. Lab pgtbl：Page tables
 
-### 5.1 实验概述
+### 5.1 实验目的与要求
 
-| 项目 | 内容 |
-|---|---|
-| 官方分支 | `pgtbl` |
-| 实验主题 | RISC-V Sv39 页表、地址转换、共享映射和大页 |
+| 项目     | 内容                                                     |
+| -------- | -------------------------------------------------------- |
+| 官方分支 | `pgtbl`                                                |
+| 实验主题 | RISC-V Sv39 页表、地址转换、共享映射和大页               |
 | 具体任务 | 解释进程页表、加速 getpid、递归打印页表、2 MiB superpage |
-| 基线提交 | `cff452f` |
-| 完成提交 | `364eff0` |
-| 实际用时 | 7 小时 |
-| 最终评分 | 41/41 |
+| 基线提交 | `cff452f`                                              |
+| 完成提交 | `364eff0`                                              |
+| 实际用时 | 7 小时                                                   |
+| 最终评分 | 41/41                                                    |
 
 本 Lab 围绕虚拟地址到物理地址的映射展开。先通过现有 `pgpte()` 观察用户进程
 的叶子 PTE，再插入用户只读共享页；随后递归打印完整三级页表，最后把 level-1
@@ -597,13 +689,13 @@ Sv39 把虚拟地址分为三级 9 位索引和 12 位页内偏移：
 每级页表含 512 个 64 位 PTE。有效非叶子 PTE 只设置 `V`，其物理页号指向下一
 级页表；含 `R/W/X` 中任意一位的有效 PTE 是叶子映射。实验输出涉及的低位为：
 
-| 位 | 含义 | 本实验中的用途 |
-|---|---|---|
-| `V` | Valid | PTE 是否有效 |
-| `R/W/X` | 读、写、执行 | 页面允许的操作 |
-| `U` | User | 用户态能否访问 |
-| `A` | Accessed | 页面是否已被访问 |
-| `D` | Dirty | 页面是否已被写入 |
+| 位        | 含义         | 本实验中的用途   |
+| --------- | ------------ | ---------------- |
+| `V`     | Valid        | PTE 是否有效     |
+| `R/W/X` | 读、写、执行 | 页面允许的操作   |
+| `U`     | User         | 用户态能否访问   |
+| `A`     | Accessed     | 页面是否已被访问 |
+| `D`     | Dirty        | 页面是否已被写入 |
 
 #### 5.2.2 实际映射分析
 
@@ -611,18 +703,18 @@ Sv39 把虚拟地址分为三级 9 位索引和 12 位页内偏移：
 访问的栈保护页和用户栈。高地址处依次预留 `USYSCALL`，并映射 supervisor
 可访问的 trapframe 和 trampoline。普通堆区尚未增长的地址没有有效 PTE。
 
-| 虚拟地址 | 权限 | 逻辑内容 |
-|---|---|---|
-| `0x0`、`0x1000` | `V|R|X|U|A` | 程序代码及只读数据 |
-| `0x2000` | `V|R|W|U` | data 和 BSS |
-| `0x3000` | `V|R|W` | 无 `U` 的栈保护页 |
-| `0x4000` | `V|R|W|U|A|D` | 用户栈 |
-| `0x3fffffd000` | 初始无映射，后为 `V|R|U` | USYSCALL 共享页 |
-| `0x3fffffe000` | `V|R|W|A|D` | trapframe |
-| `0x3ffffff000` | `V|R|X|A` | trampoline |
+| 虚拟地址            | 权限                       | 逻辑内容            |
+| ------------------- | -------------------------- | ------------------- |
+| `0x0`、`0x1000` | `V\|R\|X\|U\|A`              | 程序代码及只读数据  |
+| `0x2000`          | `V\|R\|W\|U`                | data 和 BSS         |
+| `0x3000`          | `V\|R\|W`                  | 无 `U` 的栈保护页 |
+| `0x4000`          | `V\|R\|W\|U\|A\|D`            | 用户栈              |
+| `0x3fffffd000`    | 初始无映射，后为 `V\|R\|U` | USYSCALL 共享页     |
+| `0x3fffffe000`    | `V\|R\|W\|A\|D`              | trapframe           |
+| `0x3ffffff000`    | `V\|R\|X\|A`                | trampoline          |
 
 <div align="center">
-<img src="report-assets/pgtbl-inspect-01.png" alt="用户页表与 ugetpid 测试" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/pgtbl-inspect-01.png" alt="用户页表与 ugetpid 测试" width="760">
 <br>图 5-1 pgtbltest 的典型叶子 PTE、权限与 ugetpid 测试结果
 </div>
 
@@ -681,7 +773,7 @@ if(level > 0 && (pte & (PTE_R | PTE_W | PTE_X)) == 0)
 通过 `-Werror`。
 
 <div align="center">
-<img src="report-assets/pgtbl-vmprint-01.png" alt="vmprint 三级页表输出" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/pgtbl-vmprint-01.png" alt="vmprint 三级页表输出" width="760">
 <br>图 5-2 vmprint 输出的三级页表树及高、低地址分支
 </div>
 
@@ -715,12 +807,12 @@ superpage，同时为普通页、页表和内核对象保留足够内存。
 
 #### 5.5.3 fork、释放与降级
 
-| 生命周期操作 | 处理方式 |
-|---|---|
-| fork | `uvmcopy()` 为子进程分配新 2 MiB 区域，复制完整内容并保持 level-1 叶子 |
-| 完整释放 | `uvmunmap()` 清除 level-1 PTE，调用 `superfree()` |
-| 部分释放 | 先降级成 512 个独立 4 KiB 页，再精确释放目标页 |
-| 退出 | `uvmfree()` 遍历地址空间，完整归还剩余 superpage |
+| 生命周期操作 | 处理方式                                                                 |
+| ------------ | ------------------------------------------------------------------------ |
+| fork         | `uvmcopy()` 为子进程分配新 2 MiB 区域，复制完整内容并保持 level-1 叶子 |
+| 完整释放     | `uvmunmap()` 清除 level-1 PTE，调用 `superfree()`                    |
+| 部分释放     | 先降级成 512 个独立 4 KiB 页，再精确释放目标页                           |
+| 退出         | `uvmfree()` 遍历地址空间，完整归还剩余 superpage                       |
 
 部分释放是本任务的关键边界。如果 `sbrk(-PGSIZE)` 只删除 level-1 PTE，会把
 仍应有效的约 2 MiB 数据一起丢失；如果继续保留大页，被释放的最后 4 KiB 又
@@ -729,7 +821,7 @@ superpage，同时为普通页、页表和内核对象保留足够内存。
 映射。分配失败时会释放已创建的小页并保留原映射，避免半降级状态。
 
 <div align="center">
-<img src="report-assets/pgtbl-superpages-01.png" alt="superpage fork 与部分释放测试" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/pgtbl-superpages-01.png" alt="superpage fork 与部分释放测试" width="760">
 <br>图 5-3 superpage 在 fork、完整释放和部分降级场景下全部通过
 </div>
 
@@ -737,30 +829,44 @@ superpage，同时为普通页、页表和内核对象保留足够内存。
 子进程因页错误退出正是预期结果，所以其后的 `superpg_fork` 和
 `superpg_free` 均为 `OK`。
 
-### 5.6 问题闭环与最终验收
+### 5.6 实验中遇到的问题和解决方法
 
-| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
-|---|---|---|---|
-| `ugetpid` 初始触发 load page fault | `USYSCALL` 只有地址定义，没有实际映射 | 补齐分配、只读映射、回滚和释放 | 64 次 fork 对比 PID 全部通过 |
-| `%p` 导致编译失败 | `-Werror` 要求参数类型为指针 | 将 VA、PTE、PA 显式转为 `void *` | vmprint 格式评分通过 |
-| superpage 内核地址翻译错误风险 | level-1 PTE 给出 2 MiB 基址，不能忽略页内偏移 | `walkleaf()` 返回层级，`walkaddr()` 加偏移 | 数据写入/读取检查通过 |
-| 释放 4 KiB 可能破坏整张大页 | level-1 PTE 无法表达局部无效 | 降级为 512 个普通页后再释放 | 内容保持和无效 PTE 检查通过 |
-| fork 后大页退化或共享 | 普通 `uvmcopy()` 只复制 4 KiB | 独立分配并复制完整 2 MiB | `superpg_fork: OK` |
+页表实验的问题通常不会停留在建立映射这一处，而会延伸到权限、地址翻译、fork、
+释放和失败回滚。
+
+`ugetpid` 最初一调用就触发 load page fault。虽然代码已经定义 `USYSCALL` 虚拟
+地址，但进程创建时并没有分配物理页并建立映射。补齐物理页分配、用户只读映射、
+失败回滚和退出释放后，连续 64 次 fork 得到的 PID 都与普通 `getpid()` 一致。
+
+编写 `vmprint` 时，使用 `%p` 打印整数形式的虚拟地址和页表项会被 `-Werror`
+拒绝，因为格式检查要求参数确实为指针。将 VA、PTE 和 PA 显式转换为 `void *`
+后，输出格式和专项评分均通过。
+
+支持 superpage 后，普通 `walkaddr()` 若仍按 4 KiB 叶子处理，会丢失 2 MiB 大页
+内部的偏移。解决方法是让 `walkleaf()` 同时返回叶子所在层级，再根据页大小补上
+页内偏移，数据写入和读取检查通过。
+
+另一个问题是释放大页中的 4 KiB 区间。level-1 PTE 只能描述整张 2 MiB 大页，
+直接清除会误删其余仍有效内容。实现先把大页降级为 512 个普通页，再按原有路径
+释放目标页。fork 时也不能复用只复制 4 KiB 的普通逻辑，而是为子进程独立分配并
+复制完整 2 MiB。部分释放、内容保持和 `superpg_fork` 测试均通过。
+
+### 5.7 最终验收与心得
 
 关键提交如下：
 
-| 提交 | 内容 |
-|---|---|
-| `6097a95` | 完成用户页表逐项解释 |
-| `781903e` | 映射 USYSCALL 并加速 getpid |
-| `d8c29ac` | 实现递归 vmprint |
+| 提交        | 内容                                  |
+| ----------- | ------------------------------------- |
+| `6097a95` | 完成用户页表逐项解释                  |
+| `781903e` | 映射 USYSCALL 并加速 getpid           |
+| `d8c29ac` | 实现递归 vmprint                      |
 | `b7b1643` | 实现 superpage 分配、复制、释放和降级 |
-| `364eff0` | 记录 7 小时实际用时并完成验收 |
+| `364eff0` | 记录 7 小时实际用时并完成验收         |
 
 先运行 `pgtbltest` 验证页表结构和 superpage，再执行完整评分：
 
 <div align="center">
-<img src="report-assets/pgtbl-grade-01.png" alt="pgtbl Lab 完整评分 41/41" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/pgtbl-grade-01.png" alt="pgtbl Lab 完整评分 41/41" width="760">
 <br>图 5-4 pgtbl Lab 完整评分结果 41/41
 </div>
 
@@ -772,17 +878,17 @@ superpage，同时为普通页、页表和内核对象保留足够内存。
 
 ## 6. Lab traps：Traps
 
-### 6.1 实验概述
+### 6.1 实验目的与要求
 
-| 项目 | 内容 |
-|---|---|
-| 官方分支 | `traps` |
+| 项目     | 内容                                  |
+| -------- | ------------------------------------- |
+| 官方分支 | `traps`                             |
 | 实验主题 | RISC-V 汇编、内核栈、陷阱帧和时钟中断 |
-| 具体任务 | RISC-V assembly、Backtrace、Alarm |
-| 基线提交 | `4270ccc` |
-| 完成提交 | `895895c` |
-| 实际用时 | 5 小时 |
-| 最终评分 | 95/95 |
+| 具体任务 | RISC-V assembly、Backtrace、Alarm     |
+| 基线提交 | `4270ccc`                           |
+| 完成提交 | `895895c`                           |
+| 实际用时 | 5 小时                                |
+| 最终评分 | 95/95                                 |
 
 本 Lab 从静态反汇编逐步进入运行时陷阱处理。首先分析 RISC-V 调用约定、编译器
 内联和大小端表示；随后沿内核栈帧恢复系统调用的调用链；最后增加两个系统调用，
@@ -813,7 +919,7 @@ RISC-V 使用 `a0` 至 `a7` 传递前八个整数或指针参数。`main()` 调�
 写成语言或 ABI 保证的结果。
 
 <div align="center">
-<img src="report-assets/traps-assembly-grade-01.png" alt="RISC-V 汇编答案评分通过" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/traps-assembly-grade-01.png" alt="RISC-V 汇编答案评分通过" width="760">
 <br>图 6-1 RISC-V 汇编分析答案通过专项检查
 </div>
 
@@ -841,14 +947,14 @@ r_fp() 读取 s0
 `sys_pause()` 调用 `backtrace()` 后，`bttest` 打印三个返回地址。使用
 `riscv64-linux-gnu-addr2line -e kernel/kernel` 解析后得到：
 
-| 返回地址 | 源码位置 | 含义 |
-|---|---|---|
-| `0x80001e3e` | `kernel/sysproc.c:75` | `sys_pause()` 调用点 |
-| `0x80001d18` | `kernel/syscall.c:141` | 系统调用分派 |
-| `0x80001a9c` | `kernel/trap.c:80` | 用户陷阱入口 |
+| 返回地址       | 源码位置                 | 含义                   |
+| -------------- | ------------------------ | ---------------------- |
+| `0x80001e3e` | `kernel/sysproc.c:75`  | `sys_pause()` 调用点 |
+| `0x80001d18` | `kernel/syscall.c:141` | 系统调用分派           |
+| `0x80001a9c` | `kernel/trap.c:80`     | 用户陷阱入口           |
 
 <div align="center">
-<img src="report-assets/traps-backtrace-grade-01.png" alt="Backtrace 评分和地址解析" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/traps-backtrace-grade-01.png" alt="Backtrace 评分和地址解析" width="760">
 <br>图 6-2 Backtrace 专项评分及三个返回地址的源码定位
 </div>
 
@@ -862,13 +968,13 @@ r_fp() 读取 s0
 实验新增 `sigalarm(interval, handler)` 和 `sigreturn()`，分配系统调用号 22、
 23，并补齐用户声明、调用桩、内核分派表和处理函数。`struct proc` 保存：
 
-| 字段 | 作用 |
-|---|---|
-| `alarm_interval` | 两次 alarm 之间需要经过的 timer ticks |
-| `alarm_ticks` | 当前周期已经累计的 ticks |
-| `alarm_handler` | 用户处理函数入口地址 |
-| `alarm_active` | handler 是否正在运行，防止重入 |
-| `alarm_trapframe` | handler 执行前的完整用户寄存器现场 |
+| 字段                | 作用                                  |
+| ------------------- | ------------------------------------- |
+| `alarm_interval`  | 两次 alarm 之间需要经过的 timer ticks |
+| `alarm_ticks`     | 当前周期已经累计的 ticks              |
+| `alarm_handler`   | 用户处理函数入口地址                  |
+| `alarm_active`    | handler 是否正在运行，防止重入        |
+| `alarm_trapframe` | handler 执行前的完整用户寄存器现场    |
 
 `sigalarm()` 更新配置并重新计时。进程退出或结构被复用时清空 alarm 状态；fork
 复制父进程的周期和 handler，但子进程从未激活、计数为零的状态开始，避免继承
@@ -898,33 +1004,45 @@ handler 调用 `sigreturn()` 后，内核恢复保存的完整 trapframe 并清�
 只有显式执行 `sigreturn()` 后，下一次 alarm 才能被投递。
 
 <div align="center">
-<img src="report-assets/traps-alarm-grade-01.png" alt="Alarm 四项测试通过" width="700">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/traps-alarm-grade-01.png" alt="Alarm 四项测试通过" width="700">
 <br>图 6-3 Alarm 的单次/重复触发、寄存器恢复、防重入和 a0 保持测试
 </div>
 
-### 6.5 问题闭环与最终验收
+### 6.5 实验中遇到的问题和解决方法
 
-| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
-|---|---|---|---|
-| `%p` 引起 `-Werror=format` | 内核格式属性要求 `%p` 对应指针参数 | 将返回地址显式转换为 `void *` | Backtrace 编译及评分通过 |
-| `exec alarmtest failed` | 新程序尚未写入当前 `fs.img`，且初始 Makefile 未加入目标 | 将 `_alarmtest` 加入 traps 的 `UPROGS` 并重建镜像 | `alarmtest` 可执行，四项均通过 |
-| handler 可能周期性重入 | 时钟中断在 handler 运行期间仍会发生 | 使用 `alarm_active` 门控，`sigreturn()` 后解除 | test2 通过 |
-| 原程序寄存器可能被破坏 | 只改 `epc` 无法保存任意中断点的完整状态 | 备份并恢复整个 trapframe，保护原始 `a0` | test1、test3 通过 |
+本 Lab 同时涉及编译器格式检查、文件系统镜像、内核栈和异步寄存器现场，问题表现
+相似但根因位于不同层次。
+
+Backtrace 中用 `%p` 直接打印整数返回地址时触发 `-Werror=format`。将地址显式转换
+为 `void *` 后通过编译。随后用于解析返回地址的命令又因为 Ubuntu 未安装 `rg`
+而失败，最终改用 `grep -oE` 提取地址，再通过 `while read` 逐个调用 `addr2line`，
+三个返回地址都成功定位到源码行。
+
+实现 Alarm 后曾出现 `exec alarmtest failed`。问题不在系统调用本身，而是
+`_alarmtest` 尚未加入当前分支的 `UPROGS`，旧 `fs.img` 中也没有这个程序。修改
+Makefile 并重建文件系统镜像后，测试程序可以正常执行。
+
+第一版 Alarm 只把 `epc` 改到 handler，没有完整保存用户寄存器；handler 返回后，
+原程序的寄存器和 `a0` 会被破坏。时钟中断还可能在 handler 执行期间再次投递，
+造成重入。后续保存完整 trapframe，并用 `alarm_active` 阻止重复进入，只有
+`sigreturn()` 恢复现场后才解除。test1、test2 和 test3 均通过。
+
+### 6.6 最终验收与心得
 
 关键提交如下：
 
-| 提交 | 内容 |
-|---|---|
-| `c572d63` | 完成 RISC-V 汇编分析题 |
-| `59b7b78` | 实现内核栈 Backtrace |
+| 提交        | 内容                              |
+| ----------- | --------------------------------- |
+| `c572d63` | 完成 RISC-V 汇编分析题            |
+| `59b7b78` | 实现内核栈 Backtrace              |
 | `5abddb9` | 接入 Alarm 系统调用并处理时钟中断 |
-| `895895c` | 记录 5 小时实际用时并完成验收 |
+| `895895c` | 记录 5 小时实际用时并完成验收     |
 
 从干净状态运行 `make grade`，汇编答案、Backtrace、Alarm 的 test0 至 test3、
 `usertests` 和时间检查全部通过：
 
 <div align="center">
-<img src="report-assets/traps-grade-final-01.png" alt="traps Lab 完整评分 95/95" width="427">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/traps-grade-final-01.png" alt="traps Lab 完整评分 95/95" width="427">
 <br>图 6-4 traps Lab 完整评分结果 95/95
 </div>
 
@@ -935,17 +1053,17 @@ handler 调用 `sigreturn()` 后，内核恢复保存的完整 trapframe 并清�
 
 ## 7. Lab cow：Copy-on-write
 
-### 7.1 实验概述
+### 7.1 实验目的与要求
 
-| 项目 | 内容 |
-|---|---|
-| 官方分支 | `cow` |
+| 项目     | 内容                                      |
+| -------- | ----------------------------------------- |
+| 官方分支 | `cow`                                   |
 | 实验主题 | 写时复制 fork、页错误和共享物理页生命周期 |
-| 具体任务 | Implement copy-on-write fork |
-| 基线提交 | `cf0eb5b` |
-| 完成提交 | `7fc6398` |
-| 实际用时 | 4 小时 |
-| 最终评分 | 130/130 |
+| 具体任务 | Implement copy-on-write fork              |
+| 基线提交 | `cf0eb5b`                               |
+| 完成提交 | `7fc6398`                               |
+| 实际用时 | 4 小时                                    |
+| 最终评分 | 130/130                                   |
 
 原始 `fork()` 通过 `uvmcopy()` 为子进程逐页分配物理内存并复制父进程内容。
 当父进程占用超过一半物理内存时，即使子进程马上调用 `exec()`，fork 也可能因
@@ -1040,28 +1158,39 @@ count == 0     → 填充垃圾值并放回 freelist
 `forkfork` 连续创建多层子进程并让它们交错退出，既检查引用计数竞争，也检查
 父进程的共享内容始终未被修改。
 
-### 7.6 问题闭环与最终验收
+### 7.6 实验中遇到的问题和解决方法
 
-| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
-|---|---|---|---|
-| 大地址空间 fork 失败 | 原实现立即复制全部物理页，内存峰值接近两倍 | 父子共享页并延迟复制 | 两次 `simple: OK` |
-| 代码段可能被错误改成可写 | 仅凭只读位不能判断页面原始权限 | 只给原本可写页设置 `PTE_COW` | usertests 全部通过 |
-| 子进程退出后父进程访问损坏 | 共享页被第一次 `kfree()` 提前回收 | 带锁引用计数归零后才进入 freelist | `three`、`forkfork` 通过 |
-| 内核写绕过 COW page fault | `copyout()` 直接访问 PA，不执行用户 store | 在 copyout 中显式调用 COW 拆分页逻辑 | `file`、copyout 通过 |
-| PTE 已只读但写入未触发 fault | TLB 可能缓存 fork 前的可写权限 | 修改映射后执行 `sfence_vma()` | 多进程写隔离通过 |
+COW 的难点在于同一物理页会同时出现在多个进程页表中，局部修复某一次写缺页并
+不能保证 fork、copyout 和退出路径正确。
+
+原始 fork 会立即复制全部物理页，大地址空间的内存峰值接近两倍，`simple` 测试会
+因内存不足失败。改为父子共享物理页、清除写权限并标记 `PTE_COW` 后，复制被延迟
+到首次写入，两次 `simple` 均通过。标记时只处理原本可写的页面，避免把代码段等
+真正只读页面错误变成可写页。
+
+加入共享映射后，子进程退出可能导致父进程页面被提前放回 freelist。原因是普通
+`kfree()` 不知道还有其他页表引用该页。为每个物理页增加带锁引用计数，只有计数
+降为零时才真正释放，`three` 和 `forkfork` 的交错退出测试随后通过。
+
+用户 store 会产生 COW page fault，但内核 `copyout()` 直接访问物理地址，不经过
+相同 trap 路径，最初会绕过拆分逻辑。将拆页操作提取为可复用函数，并在 copyout
+写入前显式调用后，file 和 copyout 测试通过。修改父子 PTE 权限后还执行
+`sfence_vma()`，避免 TLB 继续使用旧的可写权限。
+
+### 7.7 最终验收与心得
 
 关键提交如下：
 
-| 提交 | 内容 |
-|---|---|
+| 提交        | 内容                                      |
+| ----------- | ----------------------------------------- |
 | `ecafd04` | 实现 COW 映射、写缺页、copyout 和引用计数 |
-| `7fc6398` | 记录 4 小时实际用时并完成验收 |
+| `7fc6398` | 记录 4 小时实际用时并完成验收             |
 
 从干净状态运行 `make grade`，`cowtest` 的 `simple`、`three`、`file`、`forkfork`，
 `usertests` 的 copyin、copyout 和全量回归，以及时间检查全部通过：
 
 <div align="center">
-<img src="report-assets/cow-grade-final-01.png" alt="COW Lab 完整评分 130/130" width="411">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/cow-grade-final-01.png" alt="COW Lab 完整评分 130/130" width="411">
 <br>图 7-1 COW Lab 完整评分结果 130/130
 </div>
 
@@ -1072,17 +1201,17 @@ count == 0     → 填充垃圾值并放回 freelist
 
 ## 8. Lab net：Network driver
 
-### 8.1 实验概述
+### 8.1 实验目的与要求
 
-| 项目 | 内容 |
-|---|---|
-| 官方分支 | `net` |
+| 项目     | 内容                                               |
+| -------- | -------------------------------------------------- |
+| 官方分支 | `net`                                            |
 | 实验主题 | E1000 网卡驱动、以太网/IP/UDP 接收和阻塞式端口队列 |
-| 具体任务 | Part One: NIC、Part Two: UDP Receive |
-| 基线提交 | `982b43b` |
-| 完成提交 | `d9ad0dc` |
-| 实际用时 | 6 小时 |
-| 最终评分 | 171/171 |
+| 具体任务 | Part One: NIC、Part Two: UDP Receive               |
+| 基线提交 | `982b43b`                                        |
+| 完成提交 | `d9ad0dc`                                        |
+| 实际用时 | 6 小时                                             |
+| 最终评分 | 171/171                                            |
 
 本 Lab 从设备驱动和协议栈两个层次建立 xv6 的网络接收路径。第一部分通过 E1000
 发送、接收描述符环在内核与模拟网卡之间转移以太网帧；第二部分解析 IPv4/UDP
@@ -1144,7 +1273,7 @@ xv6 返回的 ARP Reply，以及主机向 xv6 发送的 UDP 包，证明发送 D
 和双向链路均已打通。
 
 <div align="center">
-<img src="report-assets/net-nic-grade-01.png" alt="E1000 NIC 专项评分与抓包结果" width="700">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/net-nic-grade-01.png" alt="E1000 NIC 专项评分与抓包结果" width="700">
 <br>图 8-1 E1000 NIC 专项评分与抓包结果
 </div>
 
@@ -1205,20 +1334,33 @@ E1000 RX 中断 → net_rx() → ip_rx()
 七项发送、ARP、IP 与多轮 ping 回归全部通过：
 
 <div align="center">
-<img src="report-assets/net-udp-grade-01.png" alt="UDP Receive 七项回归评分" width="700">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/net-udp-grade-01.png" alt="UDP Receive 七项回归评分" width="700">
 <br>图 8-2 UDP Receive 七项回归评分
 </div>
 
-### 8.4 问题闭环与最终验收
+### 8.4 实验中遇到的问题和解决方法
 
-| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
-|---|---|---|---|
-| TX 环回绕后页面泄漏或过早释放 | 页面在提交后仍由设备 DMA 使用 | 只在槽位再次出现 `DD` 时释放上一页 | `txone` 和 `free` 通过 |
-| 一次中断后仍有已完成 RX 包滞留 | 中断处理只消费一个描述符 | 循环处理连续的 `DD` 描述符 | `arp_rx`、`ip_rx` 通过 |
-| 接收队列为空时发生丢失唤醒 | 检查队列和睡眠不是原子操作 | 使用同一 `netlock` 配合 `sleep/wakeup` | `ping0` 至 `ping3` 通过 |
-| 畸形长度造成越界解析 | IP/UDP 长度来自不可信网络输入 | 分层校验版本、头长、总长和实际帧边界 | 全量网络测试通过 |
-| TX 失败或端口解绑后页面泄漏 | 缓冲页所有权在错误路径不明确 | 所有移交失败、丢包和清队列路径统一释放 | `free: OK` |
-| 首次完整评分 DNS 地址不符 | 系统代理改写宿主 DNS 解析结果 | 临时关闭代理后从干净状态重新评分 | `dns: OK`，171/171 |
+Network Lab 的问题横跨 DMA 描述符、硬件中断、协议解析、睡眠唤醒和宿主网络
+环境。定位时必须先区分内核实现错误与外部网络差异。
+
+TX 描述符提交后，缓冲页仍可能被设备 DMA 读取，若立即释放会产生悬空地址；若在
+环回绕时忘记释放，又会泄漏。最终只在槽位重新出现 `DD`、确认设备完成后释放
+上一页，`txone` 和 `free` 测试通过。接收侧最初一次中断只处理一个描述符，会让
+连续完成的包滞留在环中，因此改为循环消费所有带 `DD` 的描述符，ARP 和 IP 接收
+测试通过。
+
+UDP 接收队列为空时，如果检查队列和进入睡眠不是原子过程，中断可能恰好在两者
+之间到达，造成丢失唤醒。后续用同一把 `netlock` 保护检查与 `sleep/wakeup`，
+多轮 ping 测试稳定通过。
+
+协议头中的长度来自不可信网络输入，直接按字段解析可能越过实际帧边界。实现按层
+校验 IP 版本、头长、总长、UDP 长度和收到的帧长；同时明确缓冲页所有权，在 TX
+失败、畸形包、端口解绑和 copyout 失败路径统一释放，最终 `free: OK`。
+
+首次完整评分时，所有收发功能已经正常，但 DNS 项得到的地址与评分脚本不一致。
+检查后发现宿主代理把域名解析为代理保留地址，而不是测试期待的真实地址。临时
+关闭代理后从干净状态重新评分，`dns` 通过并得到 171/171。这个问题没有通过修改
+内核伪造结果，而是修正了外部测试环境。
 
 首次完整评分时，协议栈已经正确收到了 DNS 响应，但宿主代理把
 `pdos.csail.mit.edu` 解析为 `198.18.0.158`，与测试固定期待的
@@ -1226,16 +1368,18 @@ E1000 RX 中断 → net_rx() → ip_rx()
 检查均通过，最终得分为 171/171。这一过程也说明网络实验需要区分内核协议实现
 错误和宿主网络环境差异，不能为了迎合测试在内核中伪造 DNS 结果。
 
+### 8.5 最终验收与心得
+
 关键提交如下：
 
-| 提交 | 内容 |
-|---|---|
+| 提交        | 内容                                            |
+| ----------- | ----------------------------------------------- |
 | `3edc8d7` | 实现 E1000 发送、接收描述符环和缓冲区所有权管理 |
 | `8096c80` | 实现 UDP 端口队列、阻塞接收、报文校验和失败回收 |
-| `d9ad0dc` | 记录 6 小时实际用时并完成验收 |
+| `d9ad0dc` | 记录 6 小时实际用时并完成验收                   |
 
 <div align="center">
-<img src="report-assets/net-grade-final-01.png" alt="Network Lab 完整评分 171/171" width="351">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/net-grade-final-01.png" alt="Network Lab 完整评分 171/171" width="351">
 <br>图 8-3 Network Lab 完整评分结果 171/171
 </div>
 
@@ -1247,17 +1391,17 @@ CPU 与网卡何时能够重新使用同一槽位，端口队列决定中断生�
 
 ## 9. Lab lock：Locking
 
-### 9.1 实验概述
+### 9.1 实验目的与要求
 
-| 项目 | 内容 |
-|---|---|
-| 官方分支 | `lock` |
+| 项目     | 内容                                 |
+| -------- | ------------------------------------ |
+| 官方分支 | `lock`                             |
 | 实验主题 | 多核内存分配、锁竞争和写者优先读写锁 |
-| 具体任务 | Memory allocator、Read-write lock |
-| 基线提交 | `af12b48` |
-| 完成提交 | `17aa0bc` |
-| 实际用时 | 7 小时 |
-| 最终评分 | 100/100 |
+| 具体任务 | Memory allocator、Read-write lock    |
+| 基线提交 | `af12b48`                          |
+| 完成提交 | `17aa0bc`                          |
+| 实际用时 | 7 小时                               |
+| 最终评分 | 100/100                              |
 
 本 Lab 关注的不是简单地“加锁保证正确”，而是在保持共享状态不变式的同时提高
 多核并行度。第一项把全局物理页空闲链表拆成每 CPU 独立链表，使常见的本地
@@ -1328,7 +1472,7 @@ test4 检查大进程耗尽内存时的竞争性能。`usertests sbrkmuch` 也�
 物理内存仍可被完整分配。
 
 <div align="center">
-<img src="report-assets/lock-kalloc-grade-01.png" alt="每 CPU 内存分配器专项评分" width="720">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/lock-kalloc-grade-01.png" alt="每 CPU 内存分配器专项评分" width="720">
 <br>图 9-1 Memory allocator 五项专项测试全部通过
 </div>
 
@@ -1390,34 +1534,44 @@ exchange 竞争唯一的 `writer` 标志，成功后等待既有 `readers` 降�
 多把锁。专项测试连续运行四次均通过，四个 CPU 都返回 0：
 
 <div align="center">
-<img src="report-assets/lock-rwlock-grade-01.png" alt="写者优先读写锁专项评分" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/lock-rwlock-grade-01.png" alt="写者优先读写锁专项评分" width="760">
 <br>图 9-2 Read-write lock 多写者优先测试与四 CPU 结果
 </div>
 
-### 9.4 问题与解决、心得及验收
+### 9.4 实验中遇到的问题和解决方法
 
-| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
-|---|---|---|---|
-| 单一空闲链表竞争严重 | 所有 CPU 串行获取同一 `kmem.lock` | 每 CPU 独立链表和锁 | kalloctest test1 通过 |
-| 小批量偷取仍频繁竞争 | 大内存申请反复访问来源 CPU 锁 | O(1) 整链表转移 | test4 通过 |
-| 页面转移时瞬时不可见 | 摘下来源链表后先解锁、稍后才挂入目标 | 双锁覆盖整个所有权转移 | test2、test3 通过 |
-| 两个 CPU 交叉偷取死锁 | 双锁获取顺序可能相反 | 始终按 CPU 编号递增获取 | 高负载测试无死锁 |
-| 读者在写者登记窗口插队 | 检查状态与增加读者数不是单个原子动作 | 登记后二次检查并在冲突时撤销 | writer priority 通过 |
-| 多写者之间被读者穿插 | 只记录活动写者，不记录排队写者 | `waiting_writers` 阻止新读者 | 多写者优先连续通过 |
+本 Lab 不仅要求结果正确，还要求在多核压力下减少锁竞争并避免死锁。围绕锁粒度、
+所有权转移和写者优先进行了多轮调整。
+
+原始物理页分配器只有一条空闲链表，所有 CPU 都要竞争 `kmem.lock`。改为每 CPU
+独立链表和锁后，常见分配路径不再跨核竞争，kalloctest test1 通过。最初的偷页
+方案每次只移动少量页面，大内存申请仍会反复获取来源 CPU 的锁，后续改成 O(1)
+整链表转移，test4 通过。
+
+跨 CPU 转移页面时，若先从来源链表摘下页面并解锁，再挂入目标链表，这批页面在
+中间阶段对所有 CPU 都不可见。若两个 CPU 同时互相偷取且锁序相反，还会死锁。
+解决方法是让双锁覆盖完整所有权转移，并始终按 CPU 编号递增获取锁。高负载下
+test2、test3 均通过且未发生死锁。
+
+读写锁的第一版只检查是否有活动写者，读者可能在写者已经等待但尚未获得锁时继续
+插队。加入 `waiting_writers` 后，新读者在有等待写者时不再进入；读者登记后还会
+二次检查状态，发现竞争则撤销登记。单写者和多写者优先测试连续通过。
+
+### 9.5 最终验收与心得
 
 关键提交如下：
 
-| 提交 | 内容 |
-|---|---|
+| 提交        | 内容                                             |
+| ----------- | ------------------------------------------------ |
 | `3bf1bcb` | 实现每 CPU 空闲链表、固定锁序和跨 CPU 整链表转移 |
-| `d68c3cc` | 实现写者优先读写自旋锁 |
-| `17aa0bc` | 记录 7 小时实际用时并完成验收 |
+| `d68c3cc` | 实现写者优先读写自旋锁                           |
+| `17aa0bc` | 记录 7 小时实际用时并完成验收                    |
 
 从干净状态运行 `make grade`，内存分配器四项、sbrkmuch、rwlktest、完整
 usertests 和时间检查全部通过，最终得分 100/100：
 
 <div align="center">
-<img src="report-assets/lock-grade-final-01.png" alt="Lock Lab 完整评分 100/100" width="374">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/lock-grade-final-01.png" alt="Lock Lab 完整评分 100/100" width="374">
 <br>图 9-3 Lock Lab 完整评分结果 100/100
 </div>
 
@@ -1429,17 +1583,17 @@ usertests 和时间检查全部通过，最终得分 100/100：
 
 ## 10. Lab fs：File system
 
-### 10.1 实验概述
+### 10.1 实验目的与要求
 
-| 项目 | 内容 |
-|---|---|
-| 官方分支 | `fs` |
+| 项目     | 内容                                       |
+| -------- | ------------------------------------------ |
+| 官方分支 | `fs`                                     |
 | 实验主题 | inode 块映射、大文件存储与符号链接路径解析 |
-| 具体任务 | Large files、Symbolic links |
-| 基线提交 | `a95dec4` |
-| 完成提交 | `1cec73d` |
-| 实际用时 | 5 小时 |
-| 最终评分 | 100/100 |
+| 具体任务 | Large files、Symbolic links                |
+| 基线提交 | `a95dec4`                                |
+| 完成提交 | `1cec73d`                                |
+| 实际用时 | 5 小时                                     |
+| 最终评分 | 100/100                                    |
 
 本 Lab 从 xv6 文件系统的两个互补方向展开。Large files 扩展单个 inode 能寻址的
 磁盘块数量，要求在磁盘 inode 大小不变的前提下加入二级间接索引；Symbolic
@@ -1506,7 +1660,7 @@ inner = bn % NINDIRECT
 读回校验。实际输出 `wrote 65803 blocks`、`bigfile done; ok`，评分通过：
 
 <div align="center">
-<img src="report-assets/fs-bigfile-grade-01.png" alt="Large files 写入并读回 65803 个块" width="760">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/fs-bigfile-grade-01.png" alt="Large files 写入并读回 65803 个块" width="760">
 <br>图 10-1 Large files 写入并读回 65,803 个块
 </div>
 
@@ -1564,34 +1718,45 @@ symlink(target, path)
 unlink 语义、链接链、循环检测和并发链接，两项评分均通过：
 
 <div align="center">
-<img src="report-assets/fs-symlink-grade-01.png" alt="Symbolic links 专项和并发测试" width="700">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/fs-symlink-grade-01.png" alt="Symbolic links 专项和并发测试" width="700">
 <br>图 10-2 Symbolic links 功能与并发测试全部通过
 </div>
 
-### 10.4 问题与解决、心得及验收
+### 10.4 实验中遇到的问题和解决方法
 
-| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
-|---|---|---|---|
-| 增加二级地址后 inode 尺寸变化 | 直接增加地址槽会改变磁盘格式 | 将直接块从 12 减为 11，总槽数保持 13 | mkfs 和 usertests 通过 |
-| 二级索引分配后重启可能丢失指针 | 只改缓冲区而未加入日志事务 | 每次更新索引项后调用 `log_write()` | bigfile 完整读回通过 |
-| 删除大文件后磁盘块泄漏 | 只释放根或一级索引，叶子仍被占用 | `itrunc()` 按数据块、一级索引、二级根顺序释放 | usertests 通过 |
-| 链接环导致 `open()` 无限解析 | 链接目标可再次指向符号链接 | 最多跟随 10 层，超限返回 `-1` | symlink 循环测试通过 |
-| 链接切换时 inode 引用泄漏或重复持锁 | 解析下一目标前仍持有旧 inode | 每层先 `iunlockput()`，再 `namei()`、`ilock()` | 并发 symlink 测试通过 |
-| `O_NOFOLLOW` 被误当作访问模式 | 目录只读判断直接比较完整 `omode` | 判断目录访问模式时屏蔽 `O_NOFOLLOW` | `O_NOFOLLOW` 测试通过 |
+文件系统修改必须同时保持磁盘格式、日志一致性、inode 锁和空间回收正确。开发中
+遇到的问题主要集中在索引层次和符号链接递归。
+
+为 inode 增加二级间接地址时，如果直接扩充 `addrs` 数组，会改变磁盘 inode 尺寸，
+导致 mkfs 与内核使用不同的磁盘格式。实现将直接块数量从 12 减为 11，把空出的
+槽位用于二级间接块，使地址槽总数仍为 13，mkfs 和 usertests 均通过。
+
+分配新的一级或二级索引块后，最初只修改了缓冲区内容，没有把指针更新加入日志，
+重启或异常时可能丢失映射。每次修改索引项后调用 `log_write()`，保证元数据进入
+当前事务。删除大文件时也必须从叶子数据块开始，依次释放一级索引块和二级根，
+否则会泄漏磁盘块。补全 `itrunc()` 后 bigfile 能完整读回，usertests 通过。
+
+符号链接可以指向另一个符号链接，若存在环，`open()` 会无限解析。实现把最大跟随
+深度限制为 10 层，超限返回 `-1`。切换到下一目标前先对旧 inode 执行
+`iunlockput()`，再 `namei()` 并锁定新 inode，避免引用泄漏和重复持锁。处理目录
+访问模式时还需屏蔽 `O_NOFOLLOW`，不能把它误当作读写模式。循环、并发和
+`O_NOFOLLOW` 测试均通过。
+
+### 10.5 最终验收与心得
 
 关键提交如下：
 
-| 提交 | 内容 |
-|---|---|
-| `707f919` | 实现二级间接块映射与完整截断释放 |
+| 提交        | 内容                                     |
+| ----------- | ---------------------------------------- |
+| `707f919` | 实现二级间接块映射与完整截断释放         |
 | `1e9024e` | 实现符号链接系统调用、递归跟随和循环限制 |
-| `1cec73d` | 记录 5 小时实际用时并完成验收 |
+| `1cec73d` | 记录 5 小时实际用时并完成验收            |
 
 从干净状态运行 `make grade`，Large files、Symbolic links 两项、完整 usertests 和
 时间检查全部通过，最终得分为 100/100：
 
 <div align="center">
-<img src="report-assets/fs-grade-final-01.png" alt="File System Lab 完整评分 100/100" width="470">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/fs-grade-final-01.png" alt="File System Lab 完整评分 100/100" width="470">
 <br>图 10-3 File System Lab 完整评分结果 100/100
 </div>
 
@@ -1603,17 +1768,17 @@ unlink 语义、链接链、循环检测和并发链接，两项评分均通过�
 
 ## 11. Lab mmap：Memory mapping
 
-### 11.1 实验概述
+### 11.1 实验目的与要求
 
-| 项目 | 内容 |
-|---|---|
-| 官方分支 | `mmap` |
-| 实验主题 | 文件映射、VMA、惰性缺页装入和共享写回 |
+| 项目     | 内容                                                |
+| -------- | --------------------------------------------------- |
+| 官方分支 | `mmap`                                            |
+| 实验主题 | 文件映射、VMA、惰性缺页装入和共享写回               |
 | 具体任务 | 实现 `mmap()`、`munmap()` 及 fork/exit 生命周期 |
-| 基线提交 | `5648f64` |
-| 完成提交 | `9079100` |
-| 实际用时 | 8 小时 |
-| 最终评分 | 170/170 |
+| 基线提交 | `5648f64`                                         |
+| 完成提交 | `9079100`                                         |
+| 实际用时 | 8 小时                                              |
+| 最终评分 | 170/170                                             |
 
 本 Lab 在 xv6 中实现 Unix 文件内存映射的核心子集。`mmap()` 不立即分配物理页，
 只建立虚拟内存区域（VMA）；进程首次访问时由页错误处理程序读取对应文件页；
@@ -1633,12 +1798,12 @@ unlink 语义、链接链、循环检测和并发链接，两项评分均通过�
 
 `struct proc` 中加入固定 16 项的 VMA 数组，每项记录：
 
-| 字段 | 作用 |
-|---|---|
-| `addr`、`length` | 映射虚拟地址和原始字节长度 |
-| `prot`、`flags` | PTE 权限来源和共享/私有语义 |
-| `file` | 被映射文件的独立引用 |
-| `offset` | VMA 起点对应的文件偏移 |
+| 字段                 | 作用                        |
+| -------------------- | --------------------------- |
+| `addr`、`length` | 映射虚拟地址和原始字节长度  |
+| `prot`、`flags`  | PTE 权限来源和共享/私有语义 |
+| `file`             | 被映射文件的独立引用        |
+| `offset`           | VMA 起点对应的文件偏移      |
 
 映射从 `0xC0000000` 起向上选择页对齐区间。分配器扫描所有有效 VMA；若候选区间
 重叠，就把候选地址推进到冲突 VMA 末尾并重新扫描，直到找到空洞或接近
@@ -1658,7 +1823,7 @@ unlink 语义、链接链、循环检测和并发链接，两项评分均通过�
 `munmap()`：
 
 <div align="center">
-<img src="report-assets/mmap-pagefault-01.png" alt="mmap 惰性装页阶段推进到 munmap" width="720">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/mmap-pagefault-01.png" alt="mmap 惰性装页阶段推进到 munmap" width="720">
 <br>图 11-1 惰性装页完成后测试推进到 `munmap()` 阶段
 </div>
 
@@ -1724,33 +1889,51 @@ file_offset = vma.offset + (page_va - vma.addr)
 `freewalk()` 不会遇到残留叶子 PTE。文件引用从 `mmap()` 的 `filedup()` 开始，
 最终只在整段 munmap 或 exit 时对应释放，形成闭合生命周期。
 
-### 11.6 问题闭环、测试与心得
+### 11.6 实验中遇到的问题和解决方法
 
-| 问题/风险 | 根本原因 | 处理方法 | 验证结果 |
-|---|---|---|---|
-| 装页后退出触发 `panic: freewalk: leaf` | VMA 位于 `p->sz` 之外，普通页表释放不会遍历该区 | exit 在 `freewalk()` 前逐个解除 VMA | 阶段测试正常退出 |
-| 可写但不可读 PTE 持续缺页 | RISC-V 将 `W=1,R=0` 视为保留编码 | 写权限同时加入 `PTE_R|PTE_W` | read/write 测试通过 |
-| 共享写回把短文件错误扩展 | 整页零填充内容也被写到 EOF 之后 | 按 inode 当前大小截断写回 | dirty 测试保持 1.5 页长度 |
-| 整页写回可能超过日志容量 | 4 KiB 涉及多个数据块和元数据 | 按 BSIZE 拆分独立事务 | shared writeback 通过 |
-| 部分解除后读错文件位置 | 只移动 VMA 地址，未同步文件偏移 | 前缀解除同时推进 `addr` 和 `offset` | partial unmap 通过 |
-| fork 子进程访问映射页错误 | 子进程没有 VMA 元数据和文件引用 | 复制 VMA 并 `filedup()`，物理页仍惰性装入 | fork test 通过 |
-| 写只读映射未被终止 | 缺页处理未区分 load/store | 按 scause 检查 VMA prot | read-only write 通过 |
+mmap 把系统调用、页表、trap 和文件系统放入同一条延迟执行路径，因此很多错误
+会在解除映射或进程退出时才暴露。
+
+测试阶段曾把 `test basic mmap` 等 xv6 输出当作命令输入 Ubuntu Bash，因而出现
+`test: unary operator expected` 和 `command not found`。正确方式是在 Ubuntu 中
+运行 `./grade-lab-mmap mmaptest`，或者进入 QEMU 后只输入 `mmaptest`。区分两个
+终端后，测试可以正常启动并输出逐项结果。
+
+惰性装页完成后，进程退出曾触发 `panic: freewalk: leaf`。VMA 位于 `p->sz` 之外，
+普通地址空间释放路径不会遍历这些高地址叶子。解决方法是在 `freewalk()` 前逐个
+解除剩余 VMA，使共享写回、物理页释放和文件引用关闭都由统一路径完成。
+
+构造 PTE 权限时，只设置 `PTE_W` 会形成 RISC-V 保留的 `W=1,R=0` 编码，页面会
+持续缺页，因此可写映射同时加入 `PTE_R|PTE_W`。缺页处理还要根据 scause 区分
+load 和 store，否则只读映射可能被错误写入。read/write 和 read-only write 测试
+随后通过。
+
+共享映射写回时，按整页写入会把文件尾页的零填充也写到 EOF 之后，使短文件被
+意外扩展；一次写回完整 4 KiB 还可能超过 xv6 日志容量。实现按 inode 当前大小
+截断末页，并按 `BSIZE` 拆成独立事务，dirty 和 shared writeback 测试通过。
+
+部分解除 VMA 前缀时，最初只移动虚拟地址，没有同步推进文件偏移，后续缺页会从
+错误位置读取。修正为同时更新 `addr`、`offset` 和 `length` 后，partial unmap
+通过。fork 时复制 VMA 并对文件执行 `filedup()`，子进程仍按需装页，fork test
+也通过。
+
+### 11.7 最终验收与心得
 
 关键提交如下：
 
-| 提交 | 内容 |
-|---|---|
+| 提交        | 内容                                   |
+| ----------- | -------------------------------------- |
 | `a6efd1e` | 接入 mmap/munmap 系统调用并建立 VMA 表 |
 | `f65416c` | 实现文件映射页的惰性缺页装入和权限控制 |
 | `fe7f9a7` | 实现部分 munmap 与 MAP_SHARED 分块写回 |
-| `dd62bce` | 实现 fork VMA 继承和 exit 自动解除 |
-| `9079100` | 记录 8 小时实际用时并完成验收 |
+| `dd62bce` | 实现 fork VMA 继承和 exit 自动解除     |
+| `9079100` | 记录 8 小时实际用时并完成验收          |
 
 从干净状态运行 `make grade`，11 项 mmaptest、完整 usertests 和时间检查全部通过，
 最终得分 170/170：
 
 <div align="center">
-<img src="report-assets/mmap-grade-final-01.png" alt="mmap Lab 完整评分 170/170" width="390">
+<img src="https://raw.githubusercontent.com/lbyy718/xv6-labs-2025/report/report-assets/mmap-grade-final-01.png" alt="mmap Lab 完整评分 170/170" width="390">
 <br>图 11-2 mmap Lab 完整评分结果 170/170
 </div>
 
@@ -1775,7 +1958,7 @@ Lab 则补齐了另一侧的入口和分派过程。完整链路为：用户 C �
 
 ### 12.2 进程、陷阱与虚拟内存的关系
 
-当前完成的 syscall、pgtbl、traps 和 COW Lab 已展示三者的基本关系：进程通过 `struct proc`
+ syscall、pgtbl、traps 和 COW Lab 已展示三者的基本关系：进程通过 `struct proc`
 持有独立页表和 trapframe；用户态执行 `ecall` 或发生页错误时，硬件进入
 supervisor mode，trampoline 利用高地址处的 trapframe 映射保存上下文；内核
 处理完成后恢复用户页表和寄存器。`USYSCALL` 表明同一进程页表可同时包含普通
@@ -1850,178 +2033,50 @@ mmap Lab 在此基础上把文件内容直接接入用户虚拟地址空间。VM
 
 ## 14. 参考资料
 
-1. MIT 6.1810 Fall 2025 Course Website: <https://pdos.csail.mit.edu/6.828/2025/>
-2. MIT 6.1810 Tools: <https://pdos.csail.mit.edu/6.828/2025/tools.html>
-3. MIT 6.1810 Lab Guidance: <https://pdos.csail.mit.edu/6.828/2025/labs/guidance.html>
-4. MIT 6.1810 Lab: Xv6 and Unix utilities: <https://pdos.csail.mit.edu/6.828/2025/labs/util.html>
-5. MIT 6.1810 Lab: System calls: <https://pdos.csail.mit.edu/6.828/2025/labs/syscall.html>
-6. MIT 6.1810 Lab: Page tables: <https://pdos.csail.mit.edu/6.828/2025/labs/pgtbl.html>
-7. MIT 6.1810 Lab: Traps: <https://pdos.csail.mit.edu/6.828/2025/labs/traps.html>
-8. MIT 6.1810 Lab: Copy-on-Write Fork: <https://pdos.csail.mit.edu/6.828/2025/labs/cow.html>
-9. MIT 6.1810 Lab: Network Driver: <https://pdos.csail.mit.edu/6.828/2025/labs/net.html>
-10. MIT 6.1810 Lab: Locks: <https://pdos.csail.mit.edu/6.828/2025/labs/lock.html>
-11. MIT 6.1810 Lab: File System: <https://pdos.csail.mit.edu/6.828/2025/labs/fs.html>
-12. MIT 6.1810 Lab: Mmap: <https://pdos.csail.mit.edu/6.828/2025/labs/mmap.html>
+1. MIT 6.1810 Fall 2025 Course Website: [https://pdos.csail.mit.edu/6.828/2025/](https://pdos.csail.mit.edu/6.828/2025/)
+2. MIT 6.1810 Tools: [https://pdos.csail.mit.edu/6.828/2025/tools.html](https://pdos.csail.mit.edu/6.828/2025/tools.html)
+3. MIT 6.1810 Lab Guidance: [https://pdos.csail.mit.edu/6.828/2025/labs/guidance.html](https://pdos.csail.mit.edu/6.828/2025/labs/guidance.html)
+4. MIT 6.1810 Lab: Xv6 and Unix utilities: [https://pdos.csail.mit.edu/6.828/2025/labs/util.html](https://pdos.csail.mit.edu/6.828/2025/labs/util.html)
+5. MIT 6.1810 Lab: System calls: [https://pdos.csail.mit.edu/6.828/2025/labs/syscall.html](https://pdos.csail.mit.edu/6.828/2025/labs/syscall.html)
+6. MIT 6.1810 Lab: Page tables: [https://pdos.csail.mit.edu/6.828/2025/labs/pgtbl.html](https://pdos.csail.mit.edu/6.828/2025/labs/pgtbl.html)
+7. MIT 6.1810 Lab: Traps: [https://pdos.csail.mit.edu/6.828/2025/labs/traps.html](https://pdos.csail.mit.edu/6.828/2025/labs/traps.html)
+8. MIT 6.1810 Lab: Copy-on-Write Fork: [https://pdos.csail.mit.edu/6.828/2025/labs/cow.html](https://pdos.csail.mit.edu/6.828/2025/labs/cow.html)
+9. MIT 6.1810 Lab: Network Driver: [https://pdos.csail.mit.edu/6.828/2025/labs/net.html](https://pdos.csail.mit.edu/6.828/2025/labs/net.html)
+10. MIT 6.1810 Lab: Locks: [https://pdos.csail.mit.edu/6.828/2025/labs/lock.html](https://pdos.csail.mit.edu/6.828/2025/labs/lock.html)
+11. MIT 6.1810 Lab: File System: [https://pdos.csail.mit.edu/6.828/2025/labs/fs.html](https://pdos.csail.mit.edu/6.828/2025/labs/fs.html)
+12. MIT 6.1810 Lab: Mmap: [https://pdos.csail.mit.edu/6.828/2025/labs/mmap.html](https://pdos.csail.mit.edu/6.828/2025/labs/mmap.html)
 13. Russ Cox, Frans Kaashoek, Robert Morris. *xv6: a simple, Unix-like teaching operating system*.
 14. RISC-V International. *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*.
 
-<!-- 参考同学报告时只借鉴结构；若最终正文实际引用了其观点，必须在此显式标注。 -->
-
 ## 15. 源码仓库与提交记录
 
-- 源码仓库：<https://github.com/lbyy718/xv6-labs-2025>
+- 源码仓库：[https://github.com/lbyy718/xv6-labs-2025](https://github.com/lbyy718/xv6-labs-2025)
 - 官方基线远程：`mit`
 - 个人仓库远程：`origin`
 - 各 Lab 使用同名分支保存实现。
 
-| Lab | 分支 | 关键提交 | 最终评分 |
-|---|---|---|---|
-| util | `util` | `6bff0db`、`10d4cfd`、`52d4487`、`c28178d`、`5493306` | 131/131 |
-| syscall | `syscall` | `1c298e3`、`ee2117e`、`6cfe037`、`346d204`、`f031d96` | 45/45 |
-| pgtbl | `pgtbl` | `6097a95`、`781903e`、`d8c29ac`、`b7b1643`、`364eff0` | 41/41 |
-| traps | `traps` | `c572d63`、`59b7b78`、`5abddb9`、`895895c` | 95/95 |
-| cow | `cow` | `ecafd04`、`7fc6398` | 130/130 |
-| net | `net` | `3edc8d7`、`8096c80`、`d9ad0dc` | 171/171 |
-| lock | `lock` | `3bf1bcb`、`d68c3cc`、`17aa0bc` | 100/100 |
-| fs | `fs` | `707f919`、`1e9024e`、`1cec73d` | 100/100 |
-| mmap | `mmap` | `a6efd1e`、`f65416c`、`fe7f9a7`、`dd62bce`、`9079100` | 170/170 |
+| Lab     | 分支        | 关键提交                                                        | 最终评分 |
+| ------- | ----------- | --------------------------------------------------------------- | -------- |
+| util    | `util`    | `6bff0db`、`10d4cfd`、`52d4487`、`c28178d`、`5493306` | 131/131  |
+| syscall | `syscall` | `1c298e3`、`ee2117e`、`6cfe037`、`346d204`、`f031d96` | 45/45    |
+| pgtbl   | `pgtbl`   | `6097a95`、`781903e`、`d8c29ac`、`b7b1643`、`364eff0` | 41/41    |
+| traps   | `traps`   | `c572d63`、`59b7b78`、`5abddb9`、`895895c`              | 95/95    |
+| cow     | `cow`     | `ecafd04`、`7fc6398`                                        | 130/130  |
+| net     | `net`     | `3edc8d7`、`8096c80`、`d9ad0dc`                           | 171/171  |
+| lock    | `lock`    | `3bf1bcb`、`d68c3cc`、`17aa0bc`                           | 100/100  |
+| fs      | `fs`      | `707f919`、`1e9024e`、`1cec73d`                           | 100/100  |
+| mmap    | `mmap`    | `a6efd1e`、`f65416c`、`fe7f9a7`、`dd62bce`、`9079100` | 170/170  |
 
-## 附录
+## 附录：完整评分结果
 
-### 附录 A：完整评分结果
-
-| Lab | 命令 | 结果 | 证据 |
-|---|---|---|---|
-| util | `make clean && make grade` | 131/131 | 图 3-4 |
-| syscall | `make grade` | 45/45 | 图 4-4 |
-| pgtbl | `make grade` | 41/41 | 图 5-4 |
-| traps | `make grade` | 95/95 | 图 6-4 |
-| cow | `make grade` | 130/130 | 图 7-1 |
-| net | `make grade` | 171/171 | 图 8-3 |
-| lock | `make grade` | 100/100 | 图 9-3 |
-| fs | `make grade` | 100/100 | 图 10-3 |
-| mmap | `make grade` | 170/170 | 图 11-2 |
-
-### 附录 B：报告图片索引
-
-| 图片 | 所属章节 | 说明 |
-|---|---|---|
-| `report-assets/util-sixfive-01.png` | 3.3 | sixfive 多文件处理结果 |
-| `report-assets/util-memdump-01.png` | 3.4 | memdump 内置五组示例 |
-| `report-assets/util-find-exec-grade-01.png` | 3.6 | find 与 find -exec 六项回归评分 |
-| `report-assets/util-grade-final-01.png` | 3.8 | util 完整评分 131/131 |
-| `report-assets/syscall-gdb-01.png` | 4.2 | GDB 系统调用现场与页错误定位 |
-| `report-assets/syscall-sandbox-01.png` | 4.4 | sandbox 掩码和路径例外测试 |
-| `report-assets/syscall-attack-01.png` | 4.5 | attack 恢复 secret 数据 |
-| `report-assets/syscall-grade-01.png` | 4.6 | syscall 完整评分 45/45 |
-| `report-assets/pgtbl-inspect-01.png` | 5.2 | 用户页表权限和 ugetpid 测试 |
-| `report-assets/pgtbl-vmprint-01.png` | 5.4 | vmprint 三级页表树 |
-| `report-assets/pgtbl-superpages-01.png` | 5.5 | superpage fork、释放和降级测试 |
-| `report-assets/pgtbl-grade-01.png` | 5.6 | pgtbl 完整评分 41/41 |
-| `report-assets/traps-assembly-grade-01.png` | 6.2 | RISC-V 汇编答案专项评分 |
-| `report-assets/traps-backtrace-grade-01.png` | 6.3 | Backtrace 评分和返回地址解析 |
-| `report-assets/traps-alarm-grade-01.png` | 6.4 | Alarm 四项测试及实际输出 |
-| `report-assets/traps-grade-final-01.png` | 6.5 | traps 完整评分 95/95 |
-| `report-assets/cow-grade-final-01.png` | 7.6 | COW 完整评分 130/130 |
-| `report-assets/net-nic-grade-01.png` | 8.2 | E1000 NIC 专项评分与抓包结果 |
-| `report-assets/net-udp-grade-01.png` | 8.3 | UDP Receive 七项回归评分 |
-| `report-assets/net-grade-final-01.png` | 8.4 | net 完整评分 171/171 |
-| `report-assets/lock-kalloc-grade-01.png` | 9.2 | 每 CPU 内存分配器五项专项测试 |
-| `report-assets/lock-rwlock-grade-01.png` | 9.3 | 写者优先读写锁与四 CPU 结果 |
-| `report-assets/lock-grade-final-01.png` | 9.4 | lock 完整评分 100/100 |
-| `report-assets/fs-bigfile-grade-01.png` | 10.2 | Large files 写入并读回 65,803 个块 |
-| `report-assets/fs-symlink-grade-01.png` | 10.3 | Symbolic links 功能与并发专项评分 |
-| `report-assets/fs-grade-final-01.png` | 10.4 | fs 完整评分 100/100 |
-| `report-assets/mmap-pagefault-01.png` | 11.2 | mmap 惰性装页阶段推进到 munmap |
-| `report-assets/mmap-grade-final-01.png` | 11.6 | mmap 完整评分 170/170 |
-
-### 附录 C：答辩演示命令
-
-syscall Lab：
-
-```bash
-git switch syscall
-make qemu
-```
-
-```text
-sandbox 32768 - cat README
-sandbox 32768 README grep xv6 README
-secret ReportSecret7
-attack
-```
-
-pgtbl Lab：
-
-```bash
-git switch pgtbl
-make qemu
-```
-
-```text
-pgtbltest
-```
-
-traps Lab：
-
-```bash
-git switch traps
-./grade-lab-traps backtrace
-grep -oE '^0x000000008[0-9a-f]+' xv6.out | while read -r addr; do
-  printf '%s -> ' "$addr"
-  riscv64-linux-gnu-addr2line -e kernel/kernel "$addr"
-done
-./grade-lab-traps alarm
-```
-
-COW Lab：
-
-```bash
-git switch cow
-./grade-lab-cow simple three file forkfork 'usertests:'
-```
-
-Network Lab：
-
-```bash
-git switch net
-./grade-lab-net txone arp_rx ip_rx ping0 ping1 ping2 ping3 dns free
-tcpdump -nn -r packets.pcap | sed -n '1,8p'
-```
-
-Lock Lab：
-
-```bash
-git switch lock
-./grade-lab-lock kalloctest
-./grade-lab-lock rwlktest
-tail -n 18 xv6.out
-```
-
-File System Lab：
-
-```bash
-git switch fs
-./grade-lab-fs bigfile
-./grade-lab-fs symlinktest
-make grade
-```
-
-Memory Mapping Lab：
-
-```bash
-git switch mmap
-./grade-lab-mmap mmaptest
-./grade-lab-mmap usertests
-make grade
-```
-
-预期分别看到 sandbox 的拒绝/例外行为、`attack` 输出秘密，以及
-`pgtbltest: all tests succeeded`；traps 演示应看到三层内核调用链及 Alarm 的
-test0 至 test3 全部为 `OK`；COW 演示应看到四项 cowtest 和三项 usertests
-全部为 `OK`；Network 演示应看到九项网络测试全部为 `OK`，抓包中包含 UDP 和
-ARP 双向数据包；Lock 演示应看到分配器五项测试全部通过，以及读写锁四个 CPU
-均返回 0、最终 `4/4 CPUs succeeded`；File System 演示应看到 bigfile 写入并
-读回 65,803 个块、两项 symlinktest 通过以及最终 `Score: 100/100`；Memory
-Mapping 演示应看到 11 项 mmaptest、完整 usertests 和时间检查全部为 `OK`，最终
-显示 `Score: 170/170`。退出 QEMU 时先按 `Ctrl+A`，再按 `X`。
+| Lab     | 命令                         | 结果    | 证据    |
+| ------- | ---------------------------- | ------- | ------- |
+| util    | `make clean && make grade` | 131/131 | 图 3-4  |
+| syscall | `make grade`               | 45/45   | 图 4-4  |
+| pgtbl   | `make grade`               | 41/41   | 图 5-4  |
+| traps   | `make grade`               | 95/95   | 图 6-4  |
+| cow     | `make grade`               | 130/130 | 图 7-1  |
+| net     | `make grade`               | 171/171 | 图 8-3  |
+| lock    | `make grade`               | 100/100 | 图 9-3  |
+| fs      | `make grade`               | 100/100 | 图 10-3 |
+| mmap    | `make grade`               | 170/170 | 图 11-2 |
